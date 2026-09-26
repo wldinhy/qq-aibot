@@ -1,0 +1,13 @@
+.env
+config.json
+providers.json
+.venv/
+.local/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+data/
+dist/
+build/
+*.egg-info/
