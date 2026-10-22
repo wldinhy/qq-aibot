@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -20,6 +21,16 @@ def touch(path: Path, content: str = "") -> Path:
 
 
 class PlatformInstallTests(unittest.TestCase):
+    def test_bootstrap_works_with_a_western_windows_output_encoding(self):
+        root = Path(__file__).resolve().parents[1]
+        for script, arguments in (("install.py", ["--dry-run"]), ("start.py", ["--help"])):
+            with self.subTest(script=script):
+                result = subprocess.run([sys.executable, str(root / script), *arguments],
+                                        env={**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"},
+                                        capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+                self.assertIn("计划" if script == "install.py" else "统一启动", result.stdout.decode("utf-8"))
+
     @unittest.skipUnless(os.name == "nt", "Windows PowerShell launcher")
     def test_windows_comfy_home_environment_finds_managed_virtual_environment(self):
         with tempfile.TemporaryDirectory() as directory:

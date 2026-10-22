@@ -9,6 +9,8 @@ permissions:
 
 jobs:
   test:
+    env:
+      PYTHONUTF8: "1"
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
