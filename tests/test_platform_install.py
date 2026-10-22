@@ -65,7 +65,7 @@ class PlatformInstallTests(unittest.TestCase):
                 env_file = touch(root / ".env", "ONEBOT_ACCESS_TOKEN=existing-owner-token\nOTHER_VALUE=keep\n")
                 chat_file = touch(root / "data/chat.db", "existing database")
                 originals = {path: path.read_bytes() for path in (config_file, provider_file, env_file, chat_file)}
-                python = installer.bot_python(root, system)
+                python = installer.bot_python(root.resolve(), system)
                 touch(python)
                 with patch.object(installer, "system_name", return_value=system), patch.object(installer, "run"):
                     self.assertEqual(installer.main(["--bot-only"], root=root), 0)
@@ -172,7 +172,7 @@ class PlatformInstallTests(unittest.TestCase):
             config = json.loads((root / "config.json").read_text(encoding="utf-8"))
             self.assertTrue(config["image_generation"]["enabled"])
             self.assertEqual(config["image_generation"]["checkpoint"], checkpoint.name)
-            self.assertEqual(profile["checkpoint_directory"], str(checkpoint.parent))
+            self.assertEqual(Path(profile["checkpoint_directory"]).resolve(), checkpoint.parent.resolve())
             graph = ComfyImageGenerator(config["image_generation"]).workflow("text_to_image", "cat")
             self.assertEqual(graph["1"]["inputs"]["ckpt_name"], checkpoint.name)
             self.assertFalse((comfy / "models").exists())

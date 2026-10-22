@@ -176,6 +176,7 @@ def comfy_python(directory: Path, system: str) -> Path | None:
 
 
 def install_comfy(root: Path, system: str, args: argparse.Namespace, profile: dict) -> None:
+    root = root.resolve()
     directory = find_comfy(root, system, args.comfyui_home)
     existing = directory is not None
     if args.comfyui_home and directory is None:
