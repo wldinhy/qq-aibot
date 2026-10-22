@@ -35,6 +35,7 @@ class BotApplication:
         access_token: str,
         provider_loader: Callable[[], dict[str, Any]] | None = None,
         configuration_loader: Callable[[], dict[str, Any]] | None = None,
+        learning_store=None,
     ) -> None:
         self.config = config
         self.bot_config = config["bot"]
@@ -42,6 +43,7 @@ class BotApplication:
         self.llm = llm
         self.provider_loader = provider_loader
         self.configuration_loader = configuration_loader
+        self.learning_store = learning_store
         self.access_token = access_token
         self.semaphore = asyncio.Semaphore(int(self.bot_config["max_concurrency"]))
         self.session_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -218,15 +220,30 @@ class BotApplication:
             for key in ("max_reply_messages", "max_reply_chars_per_message", "max_reply_chars", "max_reply_stickers"):
                 generation[key] = settings["bot"].get(key)
             revision = persona_key(generation["system_prompt"])
+            learning_settings = settings.get("learning", {})
+            if self.learning_store and learning_settings.get("enabled"):
+                try:
+                    generation["memory_context"] = self.learning_store.context(message.text, message.session_id, str(message.user_id), revision, learning_settings)
+                except Exception as exc:
+                    print(f"[长期记忆] 本次检索跳过：{type(exc).__name__}")
             context = self.llm.using_generation(generation) if hasattr(self.llm, "using_generation") else nullcontext()
             with context:
                 await self._handle_current(message, ws, revision, settings)
+            if (self.learning_store and learning_settings.get("enabled") and learning_settings.get("auto_learn")
+                    and not message.text.startswith("/") and not _is_persona_override_attempt(message.text)
+                    and len(message.text.strip()) >= learning_settings.get("min_input_chars", 8)):
+                try:
+                    self.learning_store.enqueue(message.session_id, str(message.user_id), message.text, settings["llm"])
+                except Exception as exc:
+                    print(f"[对话学习] 入队失败：{type(exc).__name__}；已发送的回复不重发。")
 
     async def _handle_current(self, message: IncomingMessage, ws: web.WebSocketResponse, revision: str, settings: dict[str, Any]) -> None:
         bot_config = settings["bot"]
         if message.text.lower() in {"/reset", "/clear", "/清空"}:
             self.store.clear(message.session_id)
             self.group_context.clear(message.session_id)
+            if self.learning_store:
+                self.learning_store.clear_session(message.session_id)
             await ws.send_json(send_action(message, "这段对话的记忆已清空。"))
             return
         if message.text.lower() in {"/help", "/帮助"}:
@@ -258,11 +275,11 @@ class BotApplication:
         media_errors = 0
         if message.images and vision_config.get("enabled", True):
             from .config import DEFAULT_CONFIG
-            settings = {**DEFAULT_CONFIG["vision"], **vision_config}
-            for index, source in enumerate(message.images[:int(settings["max_images"])]):
+            vision_settings = {**DEFAULT_CONFIG["vision"], **vision_config}
+            for index, source in enumerate(message.images[:int(vision_settings["max_images"])]):
                 file_id = message.image_files[index] if index < len(message.image_files) else ""
                 try:
-                    data = await load_image(source, file_id, settings, lambda file: self._get_image(ws, file))
+                    data = await load_image(source, file_id, vision_settings, lambda file: self._get_image(ws, file))
                     loaded_images.append(data)
                     if index == 0:
                         reference_image = data
@@ -426,12 +443,22 @@ async def run_bot(
         from .config import data_dir, project_root
         qzone = QZoneService(project_root(), load_config, bot.call_action, client, data_dir() / "qzone.db", provider_loader)
         qzone_task = asyncio.create_task(qzone.run())
+        from .learning import LearningStore, LearningService
+        from .providers import get_profile, load_provider_store
+        learning_store = LearningStore(data_dir() / "learning.db")
+        bot.learning_store = learning_store
+        learning = LearningService(learning_store, load_config, lambda name: get_profile(load_provider_store(), name)[1])
+        learning_task = asyncio.create_task(learning.run())
         try:
             await asyncio.Event().wait()
         finally:
             qzone_task.cancel()
+            learning_task.cancel()
+            await asyncio.gather(learning_task, return_exceptions=True)
             await asyncio.gather(qzone_task, return_exceptions=True)
             await qzone.close()
             for task in bot.tasks:
                 task.cancel()
+            await asyncio.gather(*bot.tasks, return_exceptions=True)
+            learning_store.close()
             await runner.cleanup()

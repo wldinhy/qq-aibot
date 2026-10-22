@@ -403,6 +403,45 @@ python3 install.py --with-qzone
 
 任务记录保存在 `data/qzone.db`，桥接日志位于 `data/logs/qzone-bridge.log`，凭证和缓存位于 `.local`。终端空间菜单可查看最近执行记录。请求写入前会持久化占位，防止重启、重连重复发布；`pending` / `uncertain` 表示结果待人工核实，程序不会自动重发，避免服务已发布却超时导致重复。安装包与 GitHub 源码不包含这些数据。
 
+## 长期记忆、语料与 Codex 提示词工程
+
+入口为终端 **主菜单 3 → 14「长期记忆 / 全局知识 / 语料 / Codex 提示词工程」**。支持对话自动学习、跨会话的全局知识、会话个人偏好、语料导入、学习任务记录、Codex 提示词优化、应用和回滚。已有聊天队列、看图、生图和空间功能继续独立运行。
+
+这里的“学习”是记忆检索和提示词工程，**不修改 DeepSeek 等远端模型的权重**。对话后，后台将原始用户发言排入持久化队列，由选定的模型提取有逐字原文证据的知识、纠正和偏好；不把机器人自己的回答当成事实训练自己。默认使用当前聊天模型提炼记忆，也可从现有服务商配置档中选择其他模型。学习任务与聊天回复分开，学习服务失败不会补发聊天消息；失败任务可在终端查看和重试。启用自动学习会产生额外模型调用，短消息、命令和修改人设请求不进入学习。
+
+个人偏好和个人信息按**会话 + 实际发言人**隔离，不共享到其他群、私聊或同群其他人的偏好。通用知识和表达建议可作为全局候选；默认由本地终端批准后才参与跨会话检索，可在本地关闭“全局建议采用前审核”以自动采用符合条件的建议。程序有个人信息筛选，但提炼模型和筛选规则可能出错，建议保留审核。全局记忆开关不影响会话记忆。当前用户的纠正优先于记忆；原名字、身份和人设仍以本地 `llm.system_prompt` 为准。
+
+导入支持 UTF-8 的 `.txt`、`.md`、`.json`、`.jsonl`，单文件最多 10 MB。纯文字自动切分；JSON 支持 `content` 或 `instruction`/`output`，也支持只包含 `user`/`assistant` 文字的 `messages` 示例，不接受 `system` 和工具指令。每条 JSON 记录最多 1200 字符。可把公共知识作为 knowledge 导入，把你希望的表达示例作为 style 导入。带个人信息的资料应指定会话，不能作为全局语料。重复导入同一条目不会无限增加副本，导入错误会整批撤销。
+
+```text
+qq-aibot learning add "SQLite 是嵌入式数据库"
+qq-aibot learning add "我喜欢无糖咖啡" --session private:123 --user 123 --kind preference
+qq-aibot learning import "D:/corpus/style.jsonl" --kind style
+qq-aibot learning list --pending
+qq-aibot learning approve 12
+qq-aibot learning delete 12
+qq-aibot learning jobs
+qq-aibot learning retry 3
+qq-aibot learning export "data/public-corpus.jsonl"
+```
+
+**让 Codex 直接做提示词工程**需要当前系统已安装并登录 Codex CLI（Windows 和 Linux 分别检测本系统的 CLI；Ubuntu 不直接使用 Windows 的 exe）。控制中心可以运行优化，也可以执行：
+
+```text
+qq-aibot learning optimize --goal "更自然地接话，先理解真实用户上下文，避免客服套话和固定反问"
+qq-aibot learning prompt-tasks
+qq-aibot learning prompt-show 这里填任务ID
+qq-aibot learning reevaluate 这里填任务ID
+qq-aibot learning apply 这里填任务ID
+qq-aibot learning rollback
+```
+
+优化器通过 [Codex 非交互模式](https://developers.openai.com/codex/noninteractive)生成结构化候选表达指导，然后调用当前聊天模型，对闲聊、上下文纠错、身份保护、跨会话隐私等固定公开案例分别测试基线和候选，再保存评分、回复原文和风险说明。Codex 只接收本地批准的全局语料、优化目标和中性测试提示词，不读取聊天数据库，不传机器人 API Key、真实私人设定或会话个人记忆；CLI 以只读沙箱运行。当前真实人设只计算本地哈希，用于防止旧候选覆盖新设定。
+
+候选评测通过后可以在本地应用为 `llm.learned_prompt`，**不改写 `llm.system_prompt`**，下一条新回复即可使用。终端先显示候选和评测，再选择应用；API 暂时失败时，可复用候选重新评测，无需再次调用 Codex。可随时回滚上一版；若你已手动修改表达指导，程序不会用旧备份覆盖它。任务结果保存在 `data/prompt-lab`。固定公开测试及同一模型评分只能提供有限证据，不能保证真实私人设定下的所有表现；优化不触及权重。
+
+长期资料和学习队列保存在 `data/learning.db`。`/reset` 清除当前会话的短期记录、长期个人记忆及尚未采用的相关全局候选，取消其学习任务；已经本地批准的全局知识保留，需在终端单独删除。`qq-aibot memory clear --yes` 同时清除全部聊天和长期记忆。切换人设后不使用旧人设提炼的对话记忆；本地手工语料可继续作为参考。安装包与 GitHub 不包含这些私人数据，QQ 空间不使用聊天长期记忆创作动态。
+
 ## 清除记忆
 
 ```powershell

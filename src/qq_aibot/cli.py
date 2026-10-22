@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import math
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from .bot import run_bot
 from .config import config_path, data_dir, ensure_initialized, get_value, load_config, load_dotenv, parse_cli_value, project_root, save_config, set_value
 from .llm import LLMClient, LLMError
 from .memory import ConversationStore, persona_key
+from .prompt_lab import PromptLabError
 from .providers import ensure_provider_store, get_profile, load_provider_store, masked_key, normalize_api_base, providers_path, save_provider_store, validate_profile, validate_profile_name
 
 
@@ -79,6 +81,34 @@ def build_parser() -> argparse.ArgumentParser:
     clear_parser = memory_sub.add_parser("clear", help="清除聊天记忆")
     clear_parser.add_argument("--session", help="例如 private:123456；不填则清除全部")
     clear_parser.add_argument("--yes", action="store_true", help="确认清除全部记忆")
+    learning = sub.add_parser("learning", help="长期记忆、语料与 Codex 提示词工程")
+    learning_sub = learning.add_subparsers(dest="learning_command", required=True)
+    for action in ("status", "jobs", "prompt-tasks", "rollback"):
+        learning_sub.add_parser(action)
+    listing = learning_sub.add_parser("list")
+    listing.add_argument("--pending", action="store_true")
+    for action in ("approve", "delete", "retry"):
+        item = learning_sub.add_parser(action)
+        item.add_argument("id", type=int)
+    add_memory = learning_sub.add_parser("add")
+    add_memory.add_argument("text")
+    add_memory.add_argument("--session", default="")
+    add_memory.add_argument("--user", default="")
+    add_memory.add_argument("--kind", choices=["knowledge", "style", "preference", "correction"], default="knowledge")
+    importing = learning_sub.add_parser("import")
+    importing.add_argument("path")
+    importing.add_argument("--session", default="")
+    importing.add_argument("--user", default="")
+    importing.add_argument("--kind", choices=["knowledge", "style", "preference", "correction"], default="knowledge")
+    exporting = learning_sub.add_parser("export")
+    exporting.add_argument("path")
+    optimize = learning_sub.add_parser("optimize")
+    optimize.add_argument("--goal", default="回复结合真实上下文，自然简短，不像客服，不生硬反问；保留原有身份性格。")
+    apply_prompt = learning_sub.add_parser("apply")
+    apply_prompt.add_argument("task_id")
+    for action in ("prompt-show", "reevaluate"):
+        prompt_task = learning_sub.add_parser(action)
+        prompt_task.add_argument("task_id")
     return parser
 
 
@@ -191,6 +221,7 @@ def _status_lines() -> list[str]:
         f"Token：{max_tokens} | 自然聊天：{'开' if config['llm'].get('natural_style', True) else '关'} | 风格：{'简短' if config['llm'].get('reply_style', 'brief') == 'brief' else '按需展开'}",
         f"上下文：{'同群实际对话' if config['bot'].get('group_context', True) else '仅与机器人的对话'} / {config['bot']['history_messages']} 条 | 性格：仅本地修改",
         f"QQ空间：{'开' if config['qzone']['enabled'] else '关'} | 好友评论：{'开' if config['qzone']['auto_comment'] else '关'} | 评论回复：{'开' if config['qzone']['auto_reply'] else '关'} | 自动发说说：{'开' if config['qzone']['auto_post'] else '关'}",
+        f"长期记忆：{'开' if config['learning']['enabled'] else '关'} | 对话学习：{'开' if config['learning']['auto_learn'] else '关'} | 全局知识：{'开' if config['learning']['global_enabled'] else '关'}",
     ]
 
 
@@ -430,6 +461,102 @@ def _interactive_qzone_settings() -> None:
             notice = f"未保存：{exc}"
 
 
+def _interactive_learning_settings() -> None:
+    from .learning import LearningStore, validate_learning
+    notice = "Codex 优化的是提示词；不会改变远端模型权重。个人信息按会话隔离。"
+    while True:
+        config = load_config()
+        settings = config["learning"]
+        choice = _menu("长期记忆 / 语料 / Codex 提示词工程", [
+            f"长期记忆：{'开启' if settings['enabled'] else '关闭'}",
+            f"对话自动学习：{'开启' if settings['auto_learn'] else '关闭'}",
+            f"全局知识与表达习惯：{'开启' if settings['global_enabled'] else '关闭'}",
+            f"全局建议采用前审核：{'开启' if settings['review_global'] else '关闭'}",
+            f"记忆提炼模型：{settings['teacher_profile'] or '当前聊天模型'}",
+            "查看记忆 / 批准全局建议 / 删除记录",
+            "添加一条本地记忆", "导入语料文件", "查看学习任务 / 重试失败任务",
+            "运行 Codex 提示词优化与对比测试", "查看提示词任务 / 应用候选", "回滚上次提示词优化",
+            f"检索参考字符预算：{settings['max_context_chars']}",
+            f"每次检索记录数：{settings['retrieval_count']}",
+        ], notice=notice)
+        if choice < 0:
+            return
+        try:
+            if choice < 4:
+                key = ["enabled", "auto_learn", "global_enabled", "review_global"][choice]
+                settings[key] = not settings[key]
+            elif choice == 4:
+                profiles = list(load_provider_store()["profiles"])
+                selected = _menu("记忆提炼用的模型配置档", ["跟随当前聊天模型", *profiles])
+                if selected < 0:
+                    continue
+                settings["teacher_profile"] = "" if selected == 0 else profiles[selected - 1]
+            elif choice == 12:
+                settings["max_context_chars"] = _ask_number("参考字符预算", settings["max_context_chars"], 200, 12000)
+            elif choice == 13:
+                settings["retrieval_count"] = _ask_number("检索记录数", settings["retrieval_count"], 1, 30)
+            elif choice in {9, 10, 11}:
+                if choice == 9:
+                    goal = _ask("本轮希望改善什么", "自然聊天，结合真实上下文，减少客服套话；保留原有性格身份。")
+                    subprocess.call([sys.executable, "-m", "qq_aibot", "learning", "optimize", "--goal", goal], cwd=project_root())
+                elif choice == 10:
+                    from .prompt_lab import PromptLab
+                    lab = PromptLab(project_root())
+                    print(json.dumps(lab.tasks(), ensure_ascii=False, indent=2))
+                    task_id = input("输入任务 ID 查看候选和评测（留空返回）：").strip()
+                    if task_id:
+                        print(json.dumps(lab.get(task_id), ensure_ascii=False, indent=2))
+                        action = _menu("候选操作", ["应用这版表达指导", "复用候选重新评测"], clear=False)
+                        if action == 0:
+                            lab.apply(task_id)
+                            print("已应用表达指导；原 system_prompt 不变，下一条回复生效。")
+                        elif action == 1:
+                            subprocess.call([sys.executable, "-m", "qq_aibot", "learning", "reevaluate", task_id], cwd=project_root())
+                else:
+                    from .prompt_lab import PromptLab
+                    PromptLab(project_root()).rollback()
+                    print("已回滚表达指导。")
+                input("按回车返回…")
+                continue
+            else:
+                with closing(LearningStore(data_dir() / "learning.db")) as store:
+                    if choice == 5:
+                        for row in store.list(limit=30):
+                            print(f"{row['id']} | {row['status']} | {row['scope']} {row['owner']} | {row['kind']} | {row['content']}")
+                        action = input("输入 approve ID 批准或 delete ID 删除，留空返回：").strip().split()
+                        if len(action) == 2 and action[0] in {"approve", "delete"}:
+                            getattr(store, action[0])(int(action[1]))
+                    elif choice in {6, 7}:
+                        session = input("会话（留空为全局；如 private:123 或 group:456）：").strip()
+                        actor = input("发言人 QQ（留空适用该会话）：").strip() if session else ""
+                        owner = f"{session}|user:{actor}" if actor else session
+                        selected = _menu("内容用途", ["知识", "表达风格", "偏好（仅会话）", "纠正"])
+                        if selected < 0:
+                            continue
+                        kind = ["knowledge", "style", "preference", "correction"][selected]
+                        if choice == 6:
+                            result = store.add(input("记忆内容：").strip(), scope="session" if session else "global", owner=owner, kind=kind)
+                            print(f"已添加记忆 {result}。")
+                        else:
+                            path = Path(input("语料文件完整路径：").strip().strip('"')).expanduser()
+                            result = store.import_corpus(path, scope="session" if session else "global", owner=owner, kind=kind)
+                            print(f"已导入 {result} 条语料；下一条回复可检索，Codex 优化可使用全局语料。")
+                    else:
+                        print(json.dumps(store.stats(), ensure_ascii=False, indent=2))
+                        print(json.dumps(store.jobs(), ensure_ascii=False, indent=2))
+                        retry = input("输入失败任务 ID 重试（留空返回）：").strip()
+                        if retry:
+                            with store.db:
+                                store.db.execute("UPDATE jobs SET status='pending',error='' WHERE id=? AND status='failed'", (int(retry),))
+                input("按回车返回…")
+                continue
+            validate_learning(settings)
+            save_config(config)
+            notice = "已保存，后续新消息或学习任务生效。"
+        except (ValueError, OSError, KeyError, PromptLabError) as exc:
+            notice = f"未完成：{exc}"
+
+
 def _interactive_bot_settings() -> None:
     notice = "白名单留空表示不限制；黑名单中的号码永不回复。"
     while True:
@@ -451,11 +578,15 @@ def _interactive_bot_settings() -> None:
                 "识图 / 生图 / 提示词优化 / 表情包",
                 "排队模式 / 排队提示 / 旧消息过滤",
                 "QQ空间 / 好友动态评论 / 评论回复 / 自动发说说",
+                "长期记忆 / 全局知识 / 语料 / Codex 提示词工程",
             ],
             notice=notice,
         )
         if choice < 0:
             return
+        if choice == 13:
+            _interactive_learning_settings()
+            continue
         if choice == 12:
             _interactive_qzone_settings()
             notice = "已返回机器人设置。"
@@ -801,6 +932,8 @@ def doctor_command() -> int:
         print(f"[通过] 服务商配置：{providers_path()}")
         print(f"[当前] {active_name} / {active.get('model') or '未选择模型'}")
         issues.extend(validate_profile(active_name, active))
+        from .learning import validate_learning
+        validate_learning(config["learning"])
         if config["bot"]["group_mode"] not in {"off", "mention", "always"}:
             issues.append("bot.group_mode 必须是 off、mention 或 always")
     except (KeyError, ValueError) as exc:
@@ -818,6 +951,7 @@ def doctor_command() -> int:
 
 
 async def chat_command() -> int:
+    from .learning import LearningStore, LearningService
     provider_store, config = load_provider_store(), load_config()
     provider_name, provider = get_profile(provider_store)
     issues = validate_profile(provider_name, provider)
@@ -825,6 +959,9 @@ async def chat_command() -> int:
         print("；".join(issues), file=sys.stderr)
         return 1
     store = ConversationStore(data_dir() / "chat.db")
+    learned = LearningStore(data_dir() / "learning.db")
+    service = LearningService(learned, load_config, lambda name: get_profile(load_provider_store(), name)[1])
+    worker = asyncio.create_task(service.run())
     session_id = "terminal:local"
     print(f"终端测试：{provider_name} / {provider['model']}")
     print("输入 /reset 清空记忆，/exit 退出。")
@@ -843,11 +980,13 @@ async def chat_command() -> int:
                     break
                 if text.lower() in {"/reset", "/clear", "/清空"}:
                     store.clear(session_id)
+                    learned.clear_session(session_id)
                     print("记忆已清空。")
                     continue
                 current_config = load_config()
                 generation = dict(current_config["llm"])
                 revision = persona_key(generation["system_prompt"])
+                generation["memory_context"] = learned.context(text, session_id, "local", revision, current_config["learning"])
                 history = store.history(session_id, int(current_config["bot"]["history_messages"]), persona=revision)
                 history.append({"role": "user", "content": text})
                 try:
@@ -862,8 +1001,64 @@ async def chat_command() -> int:
                 store.add(session_id, "user", text, keep, persona=revision)
                 store.add(session_id, "assistant", reply, keep, persona=revision)
                 print(f"AI> {reply}")
+                learning_settings = current_config["learning"]
+                if learning_settings["enabled"] and learning_settings["auto_learn"] and len(text) >= learning_settings["min_input_chars"]:
+                    learned.enqueue(session_id, "local", text, current_config["llm"])
     finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        learned.close()
         store.close()
+    return 0
+
+
+async def learning_command(args: argparse.Namespace) -> int:
+    from .learning import LearningStore
+    action = args.learning_command
+    with closing(LearningStore(data_dir() / "learning.db")) as store:
+        if action == "status":
+            print(json.dumps(store.stats(), ensure_ascii=False, indent=2))
+        elif action == "list":
+            for row in store.list(status="pending" if args.pending else ""):
+                print(json.dumps(row, ensure_ascii=False))
+        elif action == "jobs":
+            print(json.dumps(store.jobs(), ensure_ascii=False, indent=2))
+        elif action in {"approve", "delete"}:
+            getattr(store, action)(args.id)
+            print("已完成。")
+        elif action == "retry":
+            with store.db:
+                count = store.db.execute("UPDATE jobs SET status='pending',error='' WHERE id=? AND status='failed'", (args.id,)).rowcount
+            print(f"已重新排队 {count} 个任务。")
+        elif action in {"add", "import"}:
+            owner = f"{args.session}|user:{args.user}" if args.user else args.session
+            if args.user and not args.session:
+                raise ValueError("指定 --user 时也必须指定 --session")
+            options = dict(scope="session" if args.session else "global", owner=owner, kind=args.kind)
+            result = store.add(args.text, **options) if action == "add" else store.import_corpus(Path(args.path).expanduser(), **options)
+            print(f"已完成：{result}")
+        elif action == "export":
+            print(f"已导出 {store.export(Path(args.path).expanduser())} 条全局资料；不包含会话记忆。")
+        elif action in {"optimize", "prompt-tasks", "prompt-show", "reevaluate", "apply", "rollback"}:
+            from .prompt_lab import PromptLab, optimize
+            lab = PromptLab(project_root())
+            if action == "prompt-tasks":
+                result = lab.tasks()
+            elif action == "prompt-show":
+                result = lab.get(args.task_id)
+            elif action == "reevaluate":
+                result = await lab.retry_evaluation(args.task_id, load_config(), get_profile(load_provider_store())[1])
+            elif action == "apply":
+                result = lab.apply(args.task_id)
+            elif action == "rollback":
+                result = lab.rollback()
+            else:
+                corpus = [row["content"] for row in store.list(limit=1000) if row["scope"] == "global" and row["status"] == "active"][:30]
+                print("正在调用 Codex 生成候选并测试当前聊天模型，结果保存在 data/prompt-lab；完成后可查看并应用。", flush=True)
+                result = await optimize(project_root(), load_config(), get_profile(load_provider_store())[1], corpus, args.goal)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            if action in {"optimize", "reevaluate"} and result.get("status") != "completed":
+                return 1
     return 0
 
 
@@ -907,9 +1102,15 @@ def main(argv: list[str] | None = None) -> None:
                     print("清除全部记忆需要添加 --yes", file=sys.stderr)
                     raise SystemExit(2)
                 print(f"已清除 {count} 条消息")
+                from .learning import LearningStore
+                with closing(LearningStore(data_dir() / "learning.db")) as learned:
+                    extra = learned.clear_session(args.session) if args.session else learned.clear_all()
+                    print(f"已清除 {extra} 条长期记忆及相关待处理学习任务。")
             finally:
                 store.close()
             code = 0
+        elif args.command == "learning":
+            code = asyncio.run(learning_command(args))
         elif args.command == "chat":
             code = asyncio.run(chat_command())
         elif args.command == "start" and (project_root() / "start.py").is_file():
@@ -930,7 +1131,7 @@ def main(argv: list[str] | None = None) -> None:
                 finally:
                     store.close()
                 code = 0
-    except (KeyError, TypeError, ValueError, LLMError) as exc:
+    except (KeyError, TypeError, ValueError, OSError, LLMError, PromptLabError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         code = 2
     except KeyboardInterrupt:

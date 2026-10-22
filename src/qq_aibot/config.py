@@ -8,6 +8,17 @@ from typing import Any
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "learning": {
+        "enabled": True,
+        "auto_learn": True,
+        "global_enabled": True,
+        "teacher_profile": "",
+        "review_global": True,
+        "max_context_chars": 2400,
+        "retrieval_count": 6,
+        "max_entries": 5000,
+        "min_input_chars": 8,
+    },
     "qzone": {
         "enabled": False,
         "auto_comment": False,
@@ -50,6 +61,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_file_bytes": 2097152,
     },
     "llm": {
+        "learned_prompt": "",
         "temperature": 0.8,
         "natural_style": True,
         "reply_style": "brief",
