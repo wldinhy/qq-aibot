@@ -48,7 +48,7 @@ class PlatformInstallTests(unittest.TestCase):
                 root = Path(directory)
                 with patch.object(installer, "system_name", return_value=system), \
                         patch.object(installer, "download") as download, patch.object(installer, "run") as run:
-                    self.assertEqual(installer.main(["--with-comfyui", "--dry-run"], root=root), 0)
+                    self.assertEqual(installer.main(["--with-comfyui", "--with-qzone", "--dry-run"], root=root), 0)
                 self.assertEqual(list(root.iterdir()), [])
                 download.assert_not_called()
                 run.assert_not_called()
@@ -184,3 +184,21 @@ class PlatformInstallTests(unittest.TestCase):
             installer.write_profile(root, "linux", {"bot_python": "linux-path"})
             self.assertEqual(installer.read_profile(root, "windows")["bot_python"], "windows-path")
             self.assertEqual(installer.read_profile(root, "linux")["bot_python"], "linux-path")
+
+    def test_qzone_component_reuses_built_source_without_touching_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source = root / ".local/qzone-bridge"
+            touch(source / "package.json", '{}')
+            touch(source / "dist/main.js")
+            credentials = touch(source / ".env", 'PRIVATE_VALUE=keep\n')
+            profile = {"bot_python": "keep-existing-path"}
+            with patch.object(installer.shutil, "which", return_value="existing-tool"), \
+                    patch.object(installer.subprocess, "check_output", return_value="v22.0.0"), \
+                    patch.object(installer, "run") as run, patch.object(installer.subprocess, "run") as external:
+                installer.install_qzone(root, "linux", profile)
+            run.assert_not_called()
+            external.assert_not_called()
+            self.assertEqual(credentials.read_text(), 'PRIVATE_VALUE=keep\n')
+            self.assertEqual(profile["qzone_root"], str(source))
+            self.assertEqual(profile["bot_python"], "keep-existing-path")

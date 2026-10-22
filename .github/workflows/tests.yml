@@ -23,6 +23,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Check dependency-free installer
-        run: python install.py --with-comfyui --dry-run
+        run: python install.py --with-comfyui --with-qzone --dry-run
       - run: python -m pip install -e .
       - run: python -m unittest discover -s tests -v

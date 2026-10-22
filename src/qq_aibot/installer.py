@@ -19,6 +19,7 @@ from .config import ensure_initialized, load_config, save_config
 
 NAPCAT_INSTALLER = "https://raw.githubusercontent.com/NapNeko/NapCat-Installer/main/script/install.sh"
 COMFY_REPOSITORY = "https://github.com/Comfy-Org/ComfyUI.git"
+QZONE_REPOSITORY = "https://github.com/Gu-Heping/onebot-qzone.git"
 
 
 def system_name() -> str:
@@ -224,10 +225,36 @@ def install_comfy(root: Path, system: str, args: argparse.Namespace, profile: di
         print("模型权重不会自动下载；请放入 ComfyUI/models/checkpoints，或使用 --checkpoint 指定现有模型。")
 
 
+def install_qzone(root: Path, system: str, profile: dict) -> None:
+    root = root.resolve()
+    node = shutil.which("node")
+    npm = shutil.which("npm.cmd" if system == "windows" else "npm")
+    if not node or not npm or not shutil.which("git"):
+        raise ValueError("空间评论组件需要 Node.js 18+、npm 和 Git；安装后重试 --with-qzone。")
+    version = subprocess.check_output([node, "--version"], text=True).strip().lstrip("v")
+    if int(version.split(".")[0]) < 18:
+        raise ValueError("空间组件需要 Node.js 18 或更新版本。")
+    directory = root / ".local/qzone-bridge"
+    if not (directory / "package.json").is_file():
+        directory.parent.mkdir(parents=True, exist_ok=True)
+        run(["git", "clone", "--depth", "1", QZONE_REPOSITORY, directory], root)
+    if not (directory / "dist/main.js").is_file():
+        environment = {**os.environ, "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1",
+                       "npm_config_cache": str(root / ".local/npm-cache")}
+        command = "ci" if (directory / "package-lock.json").is_file() else "install"
+        subprocess.run([npm, command, "--no-audit", "--no-fund"], cwd=directory, env=environment, check=True)
+        subprocess.run([npm, "run", "build"], cwd=directory, env=environment, check=True)
+    if not (directory / "dist/main.js").is_file():
+        raise ValueError("空间组件构建后未找到 dist/main.js。")
+    profile.update(qzone_root=str(directory), qzone_node=node)
+    print("QQ 空间组件已就绪。请在终端设置中指定好友、时间并开启；安装过程不发布或评论。")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="QQ AI Bot · Windows / Linux 统一安装")
     parser.add_argument("--bot-only", action="store_true", help="仅安装机器人，保留已有外部服务")
     parser.add_argument("--with-comfyui", action="store_true", help="安装或复用 ComfyUI")
+    parser.add_argument("--with-qzone", action="store_true", help="安装可选的 QQ 空间读取和评论桥接组件（需要 Node.js 18+、npm、Git）")
     parser.add_argument("--napcat-home", help="复用 NapCat 安装目录")
     parser.add_argument("--comfyui-home", help="复用已有 ComfyUI 目录")
     parser.add_argument("--checkpoint", help="使用已有模型文件并开启生图")
@@ -256,6 +283,8 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
                 print("NapCat：复用已有安装，否则从官方来源安装")
             if want_comfy:
                 print(f"ComfyUI：复用或安装；PyTorch 后端 {args.torch_backend}；不自动下载模型权重")
+            if args.with_qzone:
+                print("QQ空间：安装 onebot-qzone 桥接组件，不启动或发布内容；需要 Node.js 18+、npm、Git")
             return 0
         if not python.is_file():
             try:
@@ -273,6 +302,9 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
             write_profile(root, system, profile)
         if want_comfy:
             install_comfy(root, system, args, profile)
+            write_profile(root, system, profile)
+        if args.with_qzone:
+            install_qzone(root, system, profile)
             write_profile(root, system, profile)
         print("\n安装完成。配置模型：python start.py --console\n统一启动：python start.py")
         if system == "windows":

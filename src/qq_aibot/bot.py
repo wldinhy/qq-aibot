@@ -55,6 +55,7 @@ class BotApplication:
         self.seen_messages: OrderedDict[str, None] = OrderedDict()
         self.group_context = GroupContext()
         self.pending_actions: dict[str, tuple[web.WebSocketResponse, asyncio.Future[dict[str, Any]]]] = {}
+        self.active_ws: web.WebSocketResponse | None = None
         image_config = config.get("image_generation", {})
         self.image_generator = ComfyImageGenerator(image_config) if image_config.get("enabled") else None
         sticker_config = config.get("stickers", {})
@@ -111,6 +112,24 @@ class BotApplication:
         finally:
             self.pending_actions.pop(echo, None)
 
+    async def call_action(self, action: str, params: dict[str, Any]) -> dict[str, Any]:
+        ws = self.active_ws
+        if ws is None or ws.closed:
+            raise RuntimeError("NapCat 尚未连接")
+        echo = "qzone:" + uuid.uuid4().hex
+        future = asyncio.get_running_loop().create_future()
+        self.pending_actions[echo] = (ws, future)
+        try:
+            await ws.send_json({"action": action, "params": params, "echo": echo})
+            payload = await asyncio.wait_for(future, timeout=45)
+            if payload.get("retcode", 0) != 0 or payload.get("status") == "failed":
+                # Do not propagate arbitrary server text which can contain cookies.
+                raise RuntimeError(f"NapCat {action} 失败（{payload.get('retcode', 'unknown')}）")
+            data = payload.get("data")
+            return data if isinstance(data, dict) else {}
+        finally:
+            self.pending_actions.pop(echo, None)
+
     def _allowed(self, message: IncomingMessage, *, for_context: bool = False) -> bool:
         expected_qq = int(self.config["onebot"].get("qq_id", 0))
         if message.user_id == message.self_id or (expected_qq and message.self_id != expected_qq):
@@ -150,6 +169,7 @@ class BotApplication:
             raise web.HTTPUnauthorized(text="invalid OneBot access token")
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
+        self.active_ws = ws
         peer = request.remote or "unknown"
         print(f"[OneBot] 已连接：{peer}")
         try:
@@ -183,6 +203,8 @@ class BotApplication:
                     if waiting and self.bot_config.get("queue_notice", True):
                         await ws.send_json(send_action(incoming, "请求已收到，正在排队，会按顺序处理。"))
         finally:
+            if self.active_ws is ws:
+                self.active_ws = None
             for owner, future in list(self.pending_actions.values()):
                 if owner is ws and not future.done():
                     future.set_exception(MediaError("QQ 连接已断开"))
@@ -400,9 +422,16 @@ async def run_bot(
         print("本地性格：每条消息自动更新 | 不同设定的上下文分开保留")
         print("=" * 58)
         print("按 Ctrl+C 停止。")
+        from .qzone import QZoneService
+        from .config import data_dir, project_root
+        qzone = QZoneService(project_root(), load_config, bot.call_action, client, data_dir() / "qzone.db", provider_loader)
+        qzone_task = asyncio.create_task(qzone.run())
         try:
             await asyncio.Event().wait()
         finally:
+            qzone_task.cancel()
+            await asyncio.gather(qzone_task, return_exceptions=True)
+            await qzone.close()
             for task in bot.tasks:
                 task.cancel()
             await runner.cleanup()

@@ -190,6 +190,7 @@ def _status_lines() -> list[str]:
         f"回复：≤{max_messages} 条文字 + {max_stickers} 个表情 / 每条≤{config['bot'].get('max_reply_chars_per_message', 280)} 字符",
         f"Token：{max_tokens} | 自然聊天：{'开' if config['llm'].get('natural_style', True) else '关'} | 风格：{'简短' if config['llm'].get('reply_style', 'brief') == 'brief' else '按需展开'}",
         f"上下文：{'同群实际对话' if config['bot'].get('group_context', True) else '仅与机器人的对话'} / {config['bot']['history_messages']} 条 | 性格：仅本地修改",
+        f"QQ空间：{'开' if config['qzone']['enabled'] else '关'} | 好友评论：{'开' if config['qzone']['auto_comment'] else '关'} | 评论回复：{'开' if config['qzone']['auto_reply'] else '关'} | 自动发说说：{'开' if config['qzone']['auto_post'] else '关'}",
     ]
 
 
@@ -347,6 +348,84 @@ def _interactive_extra_settings(category: str) -> None:
         notice = f"已保存：{label}。" + ("下次启动生效。" if restart else "从下一条消息生效。")
 
 
+def _interactive_qzone_settings() -> None:
+    from .qzone import validate_settings
+    notice = "评论需要先运行 python install.py --with-qzone；仅原生发说说无需该组件。"
+    fields = [
+        ("enabled", "空间功能总开关", None),
+        ("auto_comment", "评论指定好友的新动态", None),
+        ("auto_reply", "回复自己空间下的新评论", None),
+        ("auto_post", "按时间自动发说说", None),
+        ("friend_ids", "指定好友 QQ（留空不评论好友）", "ids"),
+        ("post_times", "每天发说说时间", "times"),
+        ("post_topic", "发说说的主题与要求", "text"),
+        ("post_visibility", "说说可见范围", "visibility"),
+        ("max_posts_per_day", "每日发说说上限", (0, 10)),
+        ("max_comments_per_day", "每日评论和回复合计上限", (0, 100)),
+        ("poll_seconds", "检查间隔（秒）", (30, 3600)),
+        ("min_action_seconds", "两次空间操作最短间隔（秒）", (30, 86400)),
+        ("max_comment_chars", "评论字符上限", (10, 500)),
+        ("max_post_chars", "说说字符上限", (20, 2000)),
+        ("bridge_url", "空间桥接地址", "text"),
+    ]
+    while True:
+        config = load_config()
+        settings = config["qzone"]
+        labels = []
+        for key, title, _ in fields:
+            value = settings[key]
+            if isinstance(value, bool):
+                value = "开启" if value else "关闭"
+            elif isinstance(value, list):
+                value = ",".join(map(str, value)) or "空"
+            else:
+                value = str(value)
+                if len(value) > 40:
+                    value = value[:40] + "…"
+            labels.append(f"{title}：{value}")
+        choice = _menu("QQ 空间 · 仅处理开启后新收到的动态/评论", [*labels, "查看最近执行记录"], notice=notice)
+        if choice < 0:
+            return
+        if choice == len(fields):
+            import sqlite3
+            path = data_dir() / "qzone.db"
+            if not path.exists():
+                notice = "还没有空间执行记录。"
+                continue
+            with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as connection:
+                rows = connection.execute("SELECT account,kind,status,content FROM jobs WHERE status!='baseline' ORDER BY updated DESC LIMIT 15").fetchall()
+            for account, kind, status, content in rows:
+                print(f"QQ {account} | {kind} | {status} | {content[:90]}")
+            print("pending / uncertain 表示结果待核实，程序不会自动重发这些任务。")
+            input("按回车返回…")
+            continue
+        key, title, rule = fields[choice]
+        try:
+            current = settings[key]
+            if isinstance(current, bool):
+                value = not current
+            elif rule == "ids":
+                raw = input(f"{title}（逗号分隔，留空清空）：").strip()
+                value = _parse_id_list(raw)
+            elif rule == "times":
+                value = [part.strip() for part in _ask("HH:MM，多个用逗号分隔", ",".join(current)).split(",") if part.strip()]
+            elif rule == "visibility":
+                selected = _menu("空间可见范围", ["好友可见", "所有人可见", "仅自己可见"])
+                if selected < 0:
+                    continue
+                value = ["friends", "public", "private"][selected]
+            elif rule == "text":
+                value = _ask(title, current)
+            else:
+                value = _ask_number(title, current, *rule)
+            settings[key] = value
+            validate_settings(settings)
+            save_config(config)
+            notice = f"已保存：{title}；空间后台下一轮检查时生效。"
+        except ValueError as exc:
+            notice = f"未保存：{exc}"
+
+
 def _interactive_bot_settings() -> None:
     notice = "白名单留空表示不限制；黑名单中的号码永不回复。"
     while True:
@@ -367,11 +446,16 @@ def _interactive_bot_settings() -> None:
                 "聊天风格 / Token / 回复条数 / 群聊上下文",
                 "识图 / 生图 / 提示词优化 / 表情包",
                 "排队模式 / 排队提示 / 旧消息过滤",
+                "QQ空间 / 好友动态评论 / 评论回复 / 自动发说说",
             ],
             notice=notice,
         )
         if choice < 0:
             return
+        if choice == 12:
+            _interactive_qzone_settings()
+            notice = "已返回机器人设置。"
+            continue
         if choice >= 9:
             _interactive_extra_settings(["reply", "media", "queue"][choice - 9])
             notice = "已返回机器人设置，可继续选择。"

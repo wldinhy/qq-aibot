@@ -8,6 +8,23 @@ from typing import Any
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "qzone": {
+        "enabled": False,
+        "auto_comment": False,
+        "auto_reply": False,
+        "auto_post": False,
+        "friend_ids": [],
+        "poll_seconds": 120,
+        "min_action_seconds": 120,
+        "max_comments_per_day": 10,
+        "max_posts_per_day": 1,
+        "post_times": ["12:00"],
+        "post_topic": "写一条符合本地性格的简短想法，不编造现实经历，不引用私聊或群聊。",
+        "post_visibility": "friends",
+        "max_post_chars": 240,
+        "max_comment_chars": 120,
+        "bridge_url": "http://127.0.0.1:5700",
+    },
     "vision": {
         "enabled": True,
         "max_images": 3,
