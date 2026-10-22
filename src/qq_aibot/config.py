@@ -21,6 +21,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_image_bytes": 20971520,
         "text_workflow": "",
         "image_workflow": "",
+        "checkpoint": "",
         "optimize_prompt": True,
         "img2img_denoise": 0.45,
         "img2img_megapixels": 0.75,

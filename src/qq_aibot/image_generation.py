@@ -35,6 +35,8 @@ class ComfyImageGenerator:
             path = project_root() / path
         try:
             graph = json.loads(path.read_text(encoding="utf-8"))
+            if self.config.get("checkpoint"):
+                graph["1"]["inputs"]["ckpt_name"] = self.config["checkpoint"]
             # These bindings match the imported, already executed Animagine graphs.
             graph["2"]["inputs"]["text"] = prompt
             graph["4"]["inputs"]["seed"] = secrets.randbelow(2**53)

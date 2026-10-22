@@ -1,12 +1,11 @@
 # QQ Multi-Model AI Bot
 
-一个在终端运行、支持多个模型服务商和多个 API Key 的 QQ AI 机器人。Windows 版由
+一个在终端运行、支持 Windows / Linux、多个模型服务商和多个 API Key 的 QQ AI 机器人。由
 [NapCat](https://github.com/NapNeko/NapCatQQ) 登录 QQ，再通过
 [OneBot 11](https://github.com/botuniverse/onebot-11) 连接机器人；模型服务使用通用的
 OpenAI Chat Completions 兼容接口。
 
-> 登录 QQ 时需要你本人用手机 QQ 扫码确认。本项目的安装脚本从 NapCat 官方 Release
-> 下载接入端，不包含 QQ 客户端。请遵守平台规则、接入端许可和云服务商条款。
+> 登录 QQ 时需要你本人用手机 QQ 扫码确认。Windows 从 NapCat 官方 Release 下载接入端，Linux 调用 NapCat 官方安装器安装 QQ 和接入端。请遵守平台规则、接入端许可和云服务商条款。
 
 QQ 号在 OneBot 接入端登录。控制台的“QQ / OneBot 连接”可填写这个机器人 QQ 号，
 程序会核对消息中的 `self_id`，只处理该账号的消息。填写 QQ 号本身不会完成登录。
@@ -15,8 +14,11 @@ QQ 号在 OneBot 接入端登录。控制台的“QQ / OneBot 连接”可填写
 
 - 不带参数运行 `qq-aibot`，进入完整交互式控制台
 - 所有常用设置都有编号菜单，不需要记命令
-- Windows 上 `start.cmd` 或 `qq-aibot start` 一条命令启动机器人和 NapCat
-- Ubuntu/WSL 支持：独立 `.venv-ubuntu` 环境，Windows 启动脚本一键打开 WSL 终端
+- Windows / Linux 使用同一个 `install.py` 安装、`start.py` 配置和启动
+- 自动初始化 OneBot Token，保留现有性格、服务商 Key、QQ 登录态和聊天数据
+- 可安装或复用 ComfyUI；支持指定已有模型文件和 PyTorch 后端
+- 纯 Linux 同一终端管理机器人、NapCat 和 ComfyUI；Windows 保留独立服务窗口
+- 保留 Ubuntu/WSL 终端兼容入口和已有 `.venv-ubuntu` 环境
 - DeepSeek、OpenAI 及其他 OpenAI 兼容服务
 - 支持自建服务，例如提供 OpenAI 兼容接口的 Ollama、LM Studio 或 vLLM
 - 保存多个服务商配置档，每个配置档拥有独立 URL、Key 和模型
@@ -32,47 +34,53 @@ QQ 号在 OneBot 接入端登录。控制台的“QQ / OneBot 连接”可填写
 - OneBot Token 鉴权、并发和长度限制
 - 改进的终端界面：分组显示功能开关、回复限制和安全状态
 
-## Windows 一站式下载与安装
+## Windows / Linux 统一安装
 
-需要 Windows 10/11、Python 3.10 或更新版本，以及电脑上已安装的 QQ。
+需要 Python 3.10 或更新版本。安装 ComfyUI 还需要 Git；Windows 需要预先安装 QQ。Linux 的 NapCat 自动安装支持 apt / dnf 的 amd64、arm64 系统，安装系统依赖时可能需要 sudo；Debian/Ubuntu 需有 `python3-venv`。
 
-1. 从 [GitHub Releases](https://github.com/wldinhy/qq-aibot/releases/latest) 下载
-   [`qq-aibot-windows.zip`](https://github.com/wldinhy/qq-aibot/releases/latest/download/qq-aibot-windows.zip)，解压到你自己的文件夹。
-2. 在解压出的 `qq-aibot` 文件夹打开 PowerShell，运行 `.\install.cmd`。脚本会建立
-   `.venv`、安装 Python 依赖、生成本机 OneBot 密钥，并从 NapCat 官方 Release 下载
-   `NapCat.Shell.zip`；重复运行会保留现有配置。
-3. 运行 `.\.venv\Scripts\qq-aibot.exe`，在菜单 `2. 服务商 / API / 模型` 中填写自己的
-   API 地址和 Key，并选模型。
-4. 双击 `start.cmd` 或运行 `.\start.cmd`。启用生图后，这**一条命令**会打开 ComfyUI、NapCat 和机器人三个可见窗口；首次启动按
-   NapCat 窗口的二维码用手机 QQ 扫码确认。启动脚本会自动把 NapCat 的反向 WebSocket
-   接到机器人，不需要手工复制 Token。
-
-从已安装的项目目录运行 `.\.venv\Scripts\qq-aibot.exe start` 也会启动上述服务。机器人的
-运行日志显示在新打开的 PowerShell 窗口。保持三个服务窗口打开即可聊天和生图；关闭 ComfyUI 或机器人窗口
-按 `Ctrl+C`，关闭 NapCat 窗口按 `Ctrl+C`，若提示 `Terminate batch job (Y/N)?`，输入 `Y`。
-如果同一个 QQ 已在普通电脑版 QQ 登录，先退出普通 QQ 再让 NapCat 登录。
-
-开发者也可以 `git clone https://github.com/wldinhy/qq-aibot.git`，然后运行
-`.\install.cmd`（Windows）或 `./install.sh`（Ubuntu/WSL）。
-
-### Ubuntu / WSL 用户
-
-在 Ubuntu 或 Windows WSL 环境运行机器人：
+下载 [最新源码 ZIP](https://github.com/wldinhy/qq-aibot/archive/refs/heads/main.zip) 并解压，或：
 
 ```bash
-./install.sh
-.venv-ubuntu/bin/qq-aibot provider add deepseek --base-url https://api.deepseek.com
-.venv-ubuntu/bin/qq-aibot serve
+git clone https://github.com/wldinhy/qq-aibot.git
+cd qq-aibot
 ```
 
-Windows 用户安装 WSL Ubuntu 后，双击 `start-ubuntu.cmd` 可同时启动三个服务，机器人的日志显示在 Ubuntu 终端。NapCat 和 ComfyUI 仍在 Windows 运行。`start.sh` 在 WSL 中默认调用项目已有的 Windows Python 运行时，以便连接 Windows 本机服务，包括 WSL NAT 模式。本机已有的 `QQ AI Bot.lnk` 可以继续使用；快捷方式包含本机绝对路径，因此不随源码发布。
+两种系统运行相同的文件，Linux 的 Python 命令一般叫 `python3`，Windows 也可用 `py -3`：
 
-原生 Linux 环境单独安装在 `.venv-ubuntu`。需要原生 Ubuntu 运行时，可运行 `bash start.sh --native`；打开交互式控制面板可运行 `bash start.sh --console`（原生模式为 `bash start.sh --native --console`）。Linux 原生模式需要按下面的说明配置跨系统网络；默认的 Ubuntu 终端兼容模式不需要改网络。
+| 步骤 | Windows | Linux |
+| --- | --- | --- |
+| 安装机器人和 NapCat | `py -3 install.py` 或 `install.cmd` | `python3 install.py` 或 `bash install.sh` |
+| 配置模型 / Key / 性格 | `py -3 start.py --console` | `python3 start.py --console` |
+| 启动配套服务 | `py -3 start.py` 或 `start.cmd` | `python3 start.py` 或 `bash start.sh` |
+| 只检查安装计划 | `py -3 install.py --dry-run` | `python3 install.py --dry-run` |
 
-**WSL 网络配置**：
-- WSL2 镜像模式（Windows 11 22H2+）：`localhost` 可直接访问 Windows 服务
-- WSL2 NAT 模式：需要配置 Windows 主机 IP（如 `172.x.x.x`）连接 ComfyUI 和 NapCat
-- 机器人监听 `0.0.0.0` 以便 Windows NapCat 连接
+重复安装会复用环境并保留配置。Windows 环境为 `.venv`；Linux 为 `.venv-linux`，已有 `.venv-ubuntu` 会继续复用。服务安装位置记录在 `.local/services-windows.json` / `.local/services-linux.json`，不会上传 GitHub。
+
+首次登录请扫描 NapCat 二维码。启动器会在登录后配置本机器人的 OneBot 连接，并保留其他机器人的连接。Linux 日志显示在同一终端并保存到 `data/logs`；按 `Ctrl+C` 关闭本次启动的服务，复用的已有服务继续运行。Windows 仍打开独立窗口，保持窗口运行即可聊天。
+
+### 同时安装本地生图
+
+在上述安装命令后添加 `--with-comfyui`。有现成安装可指定 `--comfyui-home`，目录中应有 `main.py` 或 `ComfyUI/main.py`：
+
+```text
+python install.py --with-comfyui
+python install.py --comfyui-home "已有的 ComfyUI 目录"
+python install.py --with-comfyui --torch-backend cuda --checkpoint "已有模型文件.safetensors"
+```
+
+Linux 将 `python` 换成 `python3`。已有 ComfyUI 的环境和模型优先复用；新安装位于 `.local/ComfyUI`，使用独立虚拟环境。`--torch-backend` 支持 `auto`、`cuda`、`cpu`、`rocm`（Linux AMD）、`xpu`（Intel）；新装时 `auto` 检测到 `nvidia-smi` 会选择 CUDA，否则使用 CPU。显卡驱动需要由系统安装，AMD / Intel 应显式选择后端。
+
+模型权重不会自动下载。`--checkpoint` 指向已有的 `.safetensors` 或 `.ckpt` 文件，会把它接入模型搜索路径并开启生图，无需复制大文件。内置工作流使用 SDXL / Animagine 节点，应选兼容的模型。只安装 ComfyUI 时不会自动开启生图；放好模型后可在菜单中开启。
+
+已有外部 QQ 接入端时，可用 `python install.py --bot-only` 只安装机器人，再用 `python start.py serve` 只启动机器人服务。`--napcat-home` 可复用已有 NapCat：Linux 目录包含 `opt/QQ/qq`，Windows 目录包含 `napcat.mjs`。
+
+安装器依照 [NapCat 官方 Linux 安装说明](https://napneko.github.io/guide/boot/Shell) 和 [ComfyUI 官方手动安装说明](https://docs.comfy.org/installation/manual_install) 调用官方来源。
+
+### Windows 上的 WSL 终端
+
+`start-ubuntu.cmd` 保留原来同时启动三个服务的行为，机器人日志显示在 Ubuntu 终端，NapCat 和 ComfyUI 在 Windows 运行。已有 `QQ AI Bot.lnk` 可继续使用；快捷方式含本机绝对路径，不随源码发布。
+
+WSL 中已有 Windows `.venv` 时，`bash start.sh` 保持 Windows Python 兼容模式，便于访问 Windows 的本机服务。`bash start.sh --native` 则启动纯 Linux 服务流程；配置界面使用 `bash start.sh --console`。Windows 服务和原生 WSL 服务需要混合连接时，再根据 WSL 镜像 / NAT 网络模式配置地址；纯 Linux 本机部署直接使用 `127.0.0.1`。
 
 本地会生成以下不会上传 GitHub 的文件或目录：
 

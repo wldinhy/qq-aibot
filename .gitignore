@@ -3,6 +3,7 @@ config.json
 providers.json
 .venv/
 .venv-ubuntu/
+.venv-linux/
 .local/
 __pycache__/
 *.py[cod]

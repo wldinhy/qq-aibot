@@ -27,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("setup", help="打开交互式配置向导")
     sub.add_parser("init", help="初始化配置和数据目录")
-    sub.add_parser("start", help="在 Windows 上同时启动机器人和 NapCat")
+    sub.add_parser("start", help="在 Windows / Linux 上启动机器人和配套服务")
     sub.add_parser("serve", help="仅启动机器人服务（由启动脚本调用）")
     sub.add_parser("doctor", help="检查运行环境和配置")
     sub.add_parser("chat", help="在终端中测试当前模型")
@@ -473,7 +473,7 @@ async def interactive_console() -> int:
 
         choice = _menu(
             "控制中心",
-            ["快速配置向导", "服务商 / API / 模型", "机器人行为与权限", "QQ / OneBot 连接", "终端测试当前模型", "检查配置", "启动机器人和 NapCat", "退出"],
+            ["快速配置向导", "服务商 / API / 模型", "机器人行为与权限", "QQ / OneBot 连接", "终端测试当前模型", "检查配置", "启动机器人和配套服务", "退出"],
             allow_back=False,
             clear=False,
         )
@@ -492,8 +492,8 @@ async def interactive_console() -> int:
             if sys.stdout.isatty() and sys.stdin.isatty():
                 input("按回车返回控制中心…")
         elif choice == 6:
-            if sys.platform == "win32" and (project_root() / "start.ps1").is_file():
-                _start_windows_launcher()
+            if (project_root() / "start.py").is_file():
+                _start_services_launcher()
             elif doctor_command() == 0:
                 provider_store, config = load_provider_store(), load_config()
                 _, provider = get_profile(provider_store)
@@ -510,10 +510,10 @@ async def interactive_console() -> int:
             return 0
 
 
-def _start_windows_launcher() -> int:
-    launcher = project_root() / "start.ps1"
+def _start_services_launcher() -> int:
+    launcher = project_root() / "start.py"
     return subprocess.call(
-        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(launcher)],
+        [sys.executable, str(launcher)],
         cwd=project_root(),
     )
 
@@ -824,8 +824,8 @@ def main(argv: list[str] | None = None) -> None:
             code = 0
         elif args.command == "chat":
             code = asyncio.run(chat_command())
-        elif args.command == "start" and sys.platform == "win32" and (project_root() / "start.ps1").is_file():
-            code = _start_windows_launcher()
+        elif args.command == "start" and (project_root() / "start.py").is_file():
+            code = _start_services_launcher()
         else:
             if doctor_command() != 0:
                 print("配置检查未通过，机器人没有启动。", file=sys.stderr)

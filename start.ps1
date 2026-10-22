@@ -2,9 +2,16 @@
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$serviceProfilePath = Join-Path $projectRoot '.local\services-windows.json'
+$serviceProfile = $null
+if (Test-Path -LiteralPath $serviceProfilePath) {
+    $serviceProfile = Get-Content -LiteralPath $serviceProfilePath -Raw -Encoding UTF8 | ConvertFrom-Json
+}
 $botExe = Join-Path $projectRoot '.venv\Scripts\qq-aibot.exe'
 $napcatShell = Join-Path $projectRoot '.local\napcat\shell'
+if ($serviceProfile -and $serviceProfile.napcat_shell) { $napcatShell = [string]$serviceProfile.napcat_shell }
 $napcatLauncher = Join-Path $napcatShell 'launcher-user.bat'
+if (-not (Test-Path -LiteralPath $napcatLauncher)) { $napcatLauncher = Join-Path $napcatShell 'launcher.bat' }
 $webuiPath = Join-Path $napcatShell 'config\webui.json'
 $envPath = Join-Path $projectRoot '.env'
 $configPath = Join-Path $projectRoot 'config.json'
@@ -93,7 +100,8 @@ if (Test-ListeningPort $webuiPort) {
     Write-Host "NapCat 已在端口 $webuiPort 运行。"
 } else {
     Write-Host '正在打开 NapCat 窗口。首次登录请用手机 QQ 扫描该窗口的二维码。'
-    Start-Process -FilePath $env:ComSpec -ArgumentList '/c launcher-user.bat' -WorkingDirectory $napcatShell -WindowStyle Normal | Out-Null
+    $launcherName = Split-Path -Leaf $napcatLauncher
+    Start-Process -FilePath $env:ComSpec -ArgumentList "/c $launcherName" -WorkingDirectory $napcatShell -WindowStyle Normal | Out-Null
 }
 
 if (Test-ListeningPort $botPort) {
