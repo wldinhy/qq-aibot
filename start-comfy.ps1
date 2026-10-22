@@ -16,6 +16,9 @@ if ($env:COMFYUI_HOME) { $comfyInstall = $env:COMFYUI_HOME }
 $comfyRoot = Join-Path $comfyInstall 'ComfyUI'
 if (Test-Path -LiteralPath (Join-Path $comfyInstall 'main.py')) { $comfyRoot = $comfyInstall }
 $comfyPython = Join-Path $comfyRoot '.venv\Scripts\python.exe'
+if (Test-Path -LiteralPath (Join-Path $comfyRoot '.venv-windows\Scripts\python.exe')) {
+    $comfyPython = Join-Path $comfyRoot '.venv-windows\Scripts\python.exe'
+}
 if (-not (Test-Path -LiteralPath $comfyPython)) {
     $comfyPython = Join-Path $comfyInstall 'standalone-env\python.exe'
 }

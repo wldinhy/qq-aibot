@@ -1,5 +1,6 @@
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -19,6 +20,17 @@ def touch(path: Path, content: str = "") -> Path:
 
 
 class PlatformInstallTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows PowerShell launcher")
+    def test_windows_comfy_home_environment_finds_managed_virtual_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "ComfyUI with spaces"
+            touch(home / "main.py")
+            touch(home / ".venv-windows/Scripts/python.exe")
+            script = Path(__file__).resolve().parents[1] / "start-comfy.ps1"
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), "-CheckOnly"],
+                                    env={**os.environ, "COMFYUI_HOME": str(home)}, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+
     def test_dry_run_never_installs_or_initializes_files_on_either_platform(self):
         for system in ("windows", "linux"):
             with self.subTest(system=system), tempfile.TemporaryDirectory() as directory:
