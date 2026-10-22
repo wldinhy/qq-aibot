@@ -47,13 +47,16 @@ def validate_settings(settings: dict) -> None:
         if not isinstance(settings.get(key), bool):
             raise ValueError(f"空间开关 {key} 必须为 true 或 false")
     for key, low, high in (("poll_seconds", 30, 3600), ("min_action_seconds", 30, 86400),
-                          ("max_comments_per_day", 0, 100), ("max_posts_per_day", 0, 10),
                           ("max_comment_chars", 10, 500), ("max_post_chars", 20, 2000)):
         value = settings.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
             raise ValueError(f"空间设置 {key} 应为 {low}–{high} 的整数")
-    if not isinstance(settings.get("post_times"), list) or len(settings["post_times"]) > 10:
-        raise ValueError("空间发布时间应为最多 10 个 HH:MM 时间")
+    for key in ("max_comments_per_day", "max_posts_per_day"):
+        value = settings.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"空间设置 {key} 应为非负整数，0 表示不限次数")
+    if not isinstance(settings.get("post_times"), list):
+        raise ValueError("空间发布时间应为 HH:MM 时间列表")
     if any(not isinstance(value, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value) for value in settings["post_times"]):
         raise ValueError("空间发布时间格式应为 HH:MM，例如 12:00")
     ids = settings.get("friend_ids")
@@ -193,7 +196,7 @@ class QZoneService:
 
     def allowed(self, settings: dict, kind: str, now: float, midnight: float) -> bool:
         cap = settings["max_posts_per_day" if kind == "post" else "max_comments_per_day"]
-        return (self.store.count(self.account, kind, midnight) < cap
+        return ((cap == 0 or self.store.count(self.account, kind, midnight) < cap)
                 and now - self.store.last_action(self.account) >= settings["min_action_seconds"])
 
     async def compose(self, config: dict, kind: str, context: dict) -> str | None:

@@ -360,8 +360,8 @@ def _interactive_qzone_settings() -> None:
         ("post_times", "每天发说说时间", "times"),
         ("post_topic", "发说说的主题与要求", "text"),
         ("post_visibility", "说说可见范围", "visibility"),
-        ("max_posts_per_day", "每日发说说上限", (0, 10)),
-        ("max_comments_per_day", "每日评论和回复合计上限", (0, 100)),
+        ("max_posts_per_day", "每日发说说上限（0=不限）", "daily"),
+        ("max_comments_per_day", "每日评论和回复合计上限（0=不限）", "daily"),
         ("poll_seconds", "检查间隔（秒）", (30, 3600)),
         ("min_action_seconds", "两次空间操作最短间隔（秒）", (30, 86400)),
         ("max_comment_chars", "评论字符上限", (10, 500)),
@@ -374,7 +374,9 @@ def _interactive_qzone_settings() -> None:
         labels = []
         for key, title, _ in fields:
             value = settings[key]
-            if isinstance(value, bool):
+            if key in {"max_posts_per_day", "max_comments_per_day"} and value == 0:
+                value = "不限次数"
+            elif isinstance(value, bool):
                 value = "开启" if value else "关闭"
             elif isinstance(value, list):
                 value = ",".join(map(str, value)) or "空"
@@ -404,6 +406,8 @@ def _interactive_qzone_settings() -> None:
             current = settings[key]
             if isinstance(current, bool):
                 value = not current
+            elif rule == "daily":
+                value = _ask_int(title, current, minimum=0)
             elif rule == "ids":
                 raw = input(f"{title}（逗号分隔，留空清空）：").strip()
                 value = _parse_id_list(raw)

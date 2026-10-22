@@ -162,6 +162,31 @@ class QZoneTests(unittest.IsolatedAsyncioTestCase):
         await self.tick(200)
         self.assertEqual(len(self.bridge.sent), 1)
 
+    async def test_unlimited_comments_exceed_previous_cap_but_keep_cooldown(self):
+        self.assertEqual(self.config["qzone"]["max_comments_per_day"], 0)
+        await self.tick()
+        for index in range(12):
+            delta = (index + 1) * 31
+            self.bridge.feed["100"] = [{"tid": str(index), "content": "新动态", "created_time": self.now + delta - 1}]
+            await self.tick(delta)
+        self.assertEqual(len(self.bridge.sent), 12)
+        self.bridge.feed["100"] = [{"tid": "cooldown", "content": "稍后处理", "created_time": self.now + 372}]
+        await self.tick(373)
+        self.assertEqual(len(self.bridge.sent), 12)
+        await self.tick(404)
+        self.assertEqual(len(self.bridge.sent), 13)
+
+    async def test_unlimited_posts_allow_multiple_distinct_scheduled_posts(self):
+        self.assertEqual(self.config["qzone"]["max_posts_per_day"], 0)
+        self.config["qzone"].update(auto_comment=False, auto_reply=False, auto_post=True,
+                                     post_times=["10:01", "10:02"])
+        await self.tick()
+        self.llm.result = "第一条说说"
+        await self.tick(60)
+        self.llm.result = "第二条不同内容的说说"
+        await self.tick(120)
+        self.assertEqual(len(self.native), 2)
+
     async def test_blocklist_and_missing_timestamp_are_not_replied_to(self):
         self.config["bot"]["blocked_users"] = ["101"]
         await self.tick()
@@ -230,7 +255,8 @@ class QZoneTests(unittest.IsolatedAsyncioTestCase):
 
     def test_settings_reject_bad_times_limits_and_string_switches(self):
         for change in ({"post_times": ["24:00"]}, {"poll_seconds": 0}, {"enabled": "false"}, {"friend_ids": ["abc"]},
-                       {"bridge_url": "file:///tmp/bridge"}, {"bridge_url": "http://localhost:invalid"}):
+                       {"bridge_url": "file:///tmp/bridge"}, {"bridge_url": "http://localhost:invalid"},
+                       {"max_posts_per_day": -1}, {"max_comments_per_day": True}):
             settings = {**self.config["qzone"], **change}
             with self.subTest(change=change), self.assertRaises(ValueError):
                 validate_settings(settings)
