@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $venvPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
 $botExe = Join-Path $projectRoot '.venv\Scripts\qq-aibot.exe'

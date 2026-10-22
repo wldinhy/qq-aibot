@@ -9,6 +9,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import math
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ from . import __version__
 from .bot import run_bot
 from .config import config_path, data_dir, ensure_initialized, get_value, load_config, load_dotenv, parse_cli_value, project_root, save_config, set_value
 from .llm import LLMClient, LLMError
-from .memory import ConversationStore
+from .memory import ConversationStore, persona_key
 from .providers import ensure_provider_store, get_profile, load_provider_store, masked_key, normalize_api_base, providers_path, save_provider_store, validate_profile, validate_profile_name
 
 
@@ -81,8 +82,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _menu(title: str, options: list[str], *, allow_back: bool = True) -> int:
+def _redraw_screen() -> None:
+    """Redraw interactive pages in place; redirected output remains plain text."""
+    if not (sys.stdout.isatty() and sys.stdin.isatty()) or os.environ.get("TERM") == "dumb":
+        return
+    if sys.platform == "win32":
+        import ctypes
+        kernel = ctypes.windll.kernel32
+        handle = kernel.GetStdHandle(-11)
+        mode = ctypes.c_ulong()
+        if not kernel.GetConsoleMode(handle, ctypes.byref(mode)):
+            return
+        if not kernel.SetConsoleMode(handle, mode.value | 4):
+            return
+    print("\033[H\033[2J", end="", flush=True)
+
+
+def _menu(title: str, options: list[str], *, allow_back: bool = True, clear: bool = True, notice: str = "") -> int:
     """Return a zero-based menu choice, or -1 when the user chooses back."""
+    if clear:
+        _redraw_screen()
+    if notice:
+        print(notice)
     print(f"\n╭─ {title}")
     for index, option in enumerate(options, start=1):
         print(f"│  {index}. {option}")
@@ -116,6 +137,18 @@ def _ask_int(prompt: str, current: int, minimum: int = 1) -> int:
         print(f"请输入不小于 {minimum} 的整数。")
 
 
+def _ask_number(prompt: str, current: int | float, minimum: float, maximum: float) -> int | float:
+    while True:
+        raw = _ask(f"{prompt}（{minimum:g}–{maximum:g}）", str(current))
+        try:
+            value = int(raw) if isinstance(current, int) else float(raw)
+            if math.isfinite(value) and minimum <= value <= maximum:
+                return value
+        except ValueError:
+            pass
+        print("请输入范围内的数值。")
+
+
 def _parse_id_list(raw: str) -> list[int]:
     if not raw.strip():
         return []
@@ -139,13 +172,24 @@ def _status_lines() -> list[str]:
     token = os.environ.get("ONEBOT_ACCESS_TOKEN", "")
     token_ready = bool(token and token != "change-this-to-a-long-random-string")
     group_labels = {"mention": "仅被 @", "always": "所有消息", "off": "关闭"}
+    mode_label = {"serial": "串行", "parallel": "并行"}.get(config['bot']['processing_mode'], config['bot']['processing_mode'])
+
+    vision_enabled = config.get('vision', {}).get('enabled', True)
+    image_gen_enabled = config.get('image_generation', {}).get('enabled', False)
+    stickers_enabled = config.get('stickers', {}).get('enabled', True)
+
+    max_tokens = config['llm'].get('max_tokens', 700)
+    max_messages = config['bot'].get('max_reply_messages', 3)
+    max_stickers = config['bot'].get('max_reply_stickers', 1)
+
     return [
-        f"当前模型：{name} / {profile.get('model') or '未选择'}",
-        f"API 地址：{profile.get('api_base') or '未设置'}",
-        f"API Key：{masked_key(str(profile.get('api_key', '')))}",
-        f"机器人 QQ：{config['onebot'].get('qq_id') or '未绑定'}（由 OneBot 登录）",
-        f"群聊模式：{group_labels.get(config['bot']['group_mode'], config['bot']['group_mode'])}",
-        f"OneBot Token：{'已设置' if token_ready else '未设置'}",
+        f"模型：{name} / {profile.get('model') or '未选择'}",
+        f"QQ：{config['onebot'].get('qq_id') or '未绑定'} | Token：{'已设置' if token_ready else '未设置'} | Key：{masked_key(str(profile.get('api_key', '')))}",
+        f"看图：{'开' if vision_enabled else '关'} | 生图：{'开' if image_gen_enabled else '关'} | 表情包：{'开' if stickers_enabled else '关'}",
+        f"队列：{mode_label} / {config['bot']['max_concurrency']} 并发 | 群聊：{group_labels.get(config['bot']['group_mode'], config['bot']['group_mode'])}",
+        f"回复：≤{max_messages} 条文字 + {max_stickers} 个表情 / 每条≤{config['bot'].get('max_reply_chars_per_message', 280)} 字符",
+        f"Token：{max_tokens} | 自然聊天：{'开' if config['llm'].get('natural_style', True) else '关'} | 风格：{'简短' if config['llm'].get('reply_style', 'brief') == 'brief' else '按需展开'}",
+        f"上下文：{'同群实际对话' if config['bot'].get('group_context', True) else '仅与机器人的对话'} / {config['bot']['history_messages']} 条 | 性格：仅本地修改",
     ]
 
 
@@ -184,6 +228,7 @@ async def _interactive_add_provider() -> None:
 
 
 async def _interactive_provider_manager() -> None:
+    notice = ""
     while True:
         store = load_provider_store()
         names = list(store["profiles"])
@@ -192,14 +237,14 @@ async def _interactive_provider_manager() -> None:
             f"{store['profiles'][name].get('model') or '未选模型'}"
             for name in names
         ]
-        choice = _menu("服务商和模型", ["＋ 添加服务商", *labels])
+        choice = _menu("服务商和模型", ["＋ 添加服务商", *labels], notice=notice)
         if choice < 0:
             return
         if choice == 0:
             try:
                 await _interactive_add_provider()
             except (KeyError, TypeError, ValueError, LLMError) as exc:
-                print(f"操作失败：{exc}")
+                notice = f"操作失败：{exc}"
             continue
         name = names[choice - 1]
         action = _menu(
@@ -215,6 +260,8 @@ async def _interactive_provider_manager() -> None:
                 await provider_command(argparse.Namespace(provider_command="select", name=name))
             elif action == 2:
                 await provider_command(argparse.Namespace(provider_command="models", name=name))
+                if sys.stdout.isatty() and sys.stdin.isatty():
+                    input("按回车返回服务商设置…")
             elif action == 3:
                 await provider_command(argparse.Namespace(provider_command="set-key", name=name, clear=False))
             elif action == 4:
@@ -227,15 +274,84 @@ async def _interactive_provider_manager() -> None:
                 confirm = _menu("确认删除？", ["取消", "确认删除"], allow_back=False)
                 if confirm == 1:
                     await provider_command(argparse.Namespace(provider_command="remove", name=name, yes=True))
+            notice = "操作已完成。"
         except (KeyError, TypeError, ValueError, LLMError) as exc:
-            print(f"操作失败：{exc}")
+            notice = f"操作失败：{exc}"
+
+
+def _interactive_extra_settings(category: str) -> None:
+    # key, label, either inclusive numeric bounds or enum values/labels.
+    specs = {
+        "reply": [
+            ("llm.natural_style", "自然聊天约束", None),
+            ("llm.reply_style", "回复风格", [("brief", "简短随口聊"), ("adaptive", "按问题展开")]),
+            ("llm.max_tokens", "回复 Token 上限", (64, 4096)),
+            ("llm.temperature", "表达随机性", (0.0, 2.0)),
+            ("bot.max_reply_messages", "最多文字条数", (1, 3)),
+            ("bot.max_reply_chars_per_message", "单条字符上限", (20, 280)),
+            ("bot.max_reply_chars", "每次总字符上限", (20, 840)),
+            ("bot.max_reply_stickers", "每次最多表情包", (0, 1)),
+            ("bot.group_context", "结合同群实际对话（未 @ 的消息也作为背景）", None),
+            ("bot.history_messages", "上下文消息数", (2, 100)),
+        ],
+        "media": [
+            ("vision.enabled", "识别 QQ 图片和表情包", None),
+            ("vision.max_images", "每次最多识图张数", (1, 3)),
+            ("stickers.enabled", "发送表情包", None),
+            ("image_generation.enabled", "本地生图服务", None),
+            ("image_generation.optimize_prompt", "生图提示词优化", None),
+            ("image_generation.optimizer_max_tokens", "提示词优化 Token 上限", (256, 4096)),
+            ("image_generation.img2img_denoise", "图生图修改强度", (0.2, 0.7)),
+            ("image_generation.img2img_megapixels", "图生图分辨率（百万像素）", (0.1, 2.0)),
+            ("image_generation.timeout_seconds", "生图最长等待（秒）", (30, 1800)),
+        ],
+        "queue": [
+            ("bot.processing_mode", "请求处理模式", [("parallel", "不同会话并行，同一会话按顺序"), ("serial", "所有会话按顺序")]),
+            ("bot.max_concurrency", "最大并发（下次启动生效）", (1, 16)),
+            ("bot.queue_notice", "发送排队提示", None),
+            ("bot.ignore_before_start", "忽略启动前收到的旧消息", None),
+            ("bot.max_input_chars", "每条输入字符上限", (100, 12000)),
+        ],
+    }[category]
+    titles = {"reply": "聊天风格、长度与上下文", "media": "识图、生图与表情包", "queue": "排队与消息处理"}
+    notice = "开关直接切换，数值可按回车保留。"
+    while True:
+        config = load_config()
+        labels = []
+        for key, label, rule in specs:
+            value = get_value(config, key)
+            if isinstance(value, bool):
+                display = "开启" if value else "关闭"
+            elif isinstance(rule, list):
+                display = dict(rule).get(value, value)
+            else:
+                display = str(value)
+            labels.append(f"{label}：{display}")
+        choice = _menu(titles[category], labels, notice=notice)
+        if choice < 0:
+            return
+        key, label, rule = specs[choice]
+        current = get_value(config, key)
+        if isinstance(current, bool):
+            value = not current
+        elif isinstance(rule, list):
+            selected = _menu(label, [item[1] for item in rule])
+            if selected < 0:
+                continue
+            value = rule[selected][0]
+        else:
+            value = _ask_number(label, current, *rule)
+        set_value(config, key, value)
+        save_config(config)
+        restart = key in {"bot.max_concurrency", "bot.processing_mode"} or key.startswith("image_generation.") or key == "stickers.enabled"
+        notice = f"已保存：{label}。" + ("下次启动生效。" if restart else "从下一条消息生效。")
 
 
 def _interactive_bot_settings() -> None:
+    notice = "白名单留空表示不限制；黑名单中的号码永不回复。"
     while True:
         config = load_config()
         bot = config["bot"]
-        print("白名单留空表示不限制；黑名单中的号码永不回复。")
         choice = _menu(
             "机器人设置",
             [
@@ -248,10 +364,18 @@ def _interactive_bot_settings() -> None:
                 f"用户黑名单：{len(bot['blocked_users'])} 个",
                 f"群白名单：{len(bot['allowed_groups'])} 个",
                 f"群黑名单：{len(bot['blocked_groups'])} 个",
+                "聊天风格 / Token / 回复条数 / 群聊上下文",
+                "识图 / 生图 / 提示词优化 / 表情包",
+                "排队模式 / 排队提示 / 旧消息过滤",
             ],
+            notice=notice,
         )
         if choice < 0:
             return
+        if choice >= 9:
+            _interactive_extra_settings(["reply", "media", "queue"][choice - 9])
+            notice = "已返回机器人设置，可继续选择。"
+            continue
         try:
             if choice == 0:
                 modes = ["mention", "always", "off"]
@@ -261,22 +385,26 @@ def _interactive_bot_settings() -> None:
             elif choice == 2:
                 config["llm"]["system_prompt"] = _ask("机器人性格提示词", config["llm"]["system_prompt"])
             elif choice == 3:
-                bot["history_messages"] = _ask_int("保留多少条上下文消息", int(bot["history_messages"]), 2)
+                bot["history_messages"] = _ask_number("保留多少条上下文消息", int(bot["history_messages"]), 2, 100)
             elif choice == 4:
-                bot["max_concurrency"] = _ask_int("最大同时请求数", int(bot["max_concurrency"]), 1)
+                bot["max_concurrency"] = _ask_number("最大同时请求数", int(bot["max_concurrency"]), 1, 16)
             else:
                 keys = ["allowed_users", "blocked_users", "allowed_groups", "blocked_groups"]
                 key = keys[choice - 5]
                 current = ",".join(str(item) for item in bot[key])
                 bot[key] = _parse_id_list(_ask("输入号码，多个用英文逗号分隔，留空表示清空", current))
         except ValueError as exc:
-            print(f"设置失败：{exc}")
+            notice = f"设置失败：{exc}"
             continue
         save_config(config)
-        print("设置已保存。普通运行参数在下次启动时生效。")
+        if choice == 2:
+            notice = "性格已保存，从下一条消息生效；旧性格记录保留。"
+        else:
+            notice = "设置已保存。" + ("并发数下次启动生效。" if choice == 4 else "从下一条消息生效。")
 
 
 def _interactive_onebot_settings() -> None:
+    notice = "连接设置下次启动生效。"
     while True:
         config = load_config()
         onebot = config["onebot"]
@@ -289,6 +417,7 @@ def _interactive_onebot_settings() -> None:
                 f"WebSocket 路径：{onebot['path']}",
                 "生成新的 OneBot Token",
             ],
+            notice=notice,
         )
         if choice < 0:
             return
@@ -303,9 +432,10 @@ def _interactive_onebot_settings() -> None:
             onebot["path"] = path if path.startswith("/") else "/" + path
         else:
             secret_command(argparse.Namespace(secret_command="set", name="onebot"))
+            notice = "OneBot Token 已更新，下次启动生效。"
             continue
         save_config(config)
-        print("OneBot 设置已保存。")
+        notice = "OneBot 设置已保存，下次启动生效。"
 
 
 async def interactive_setup() -> None:
@@ -323,16 +453,29 @@ async def interactive_setup() -> None:
 
 async def interactive_console() -> int:
     _interactive_ready()
+    use_color = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
     while True:
-        print("\n╭──────────────────────────────────────────╮")
-        print(f"│ {('QQ AI Bot ' + __version__):^40} │")
+        _redraw_screen()
+        if use_color:
+            print(f"\033[1;36mQQ AI Bot {__version__} · 控制中心\033[0m")
+        else:
+            print(f"QQ AI Bot {__version__} · 控制中心")
+
         for line in _status_lines():
-            print(f"│ {line[:40]:<40} │")
-        print("╰──────────────────────────────────────────╯")
+            if use_color and line.startswith("═══"):
+                print(f"\033[1;33m{line}\033[0m")
+            elif use_color and ("✓" in line or "已设置" in line or "已启用" in line):
+                print(f"\033[32m{line}\033[0m")
+            elif use_color and ("✗" in line or "未设置" in line or "未绑定" in line):
+                print(f"\033[31m{line}\033[0m")
+            else:
+                print(line)
+
         choice = _menu(
             "控制中心",
             ["快速配置向导", "服务商 / API / 模型", "机器人行为与权限", "QQ / OneBot 连接", "终端测试当前模型", "检查配置", "启动机器人和 NapCat", "退出"],
             allow_back=False,
+            clear=False,
         )
         if choice == 0:
             await interactive_setup()
@@ -346,6 +489,8 @@ async def interactive_console() -> int:
             await chat_command()
         elif choice == 5:
             doctor_command()
+            if sys.stdout.isatty() and sys.stdin.isatty():
+                input("按回车返回控制中心…")
         elif choice == 6:
             if sys.platform == "win32" and (project_root() / "start.ps1").is_file():
                 _start_windows_launcher()
@@ -612,18 +757,22 @@ async def chat_command() -> int:
                     store.clear(session_id)
                     print("记忆已清空。")
                     continue
-                history = store.history(session_id, int(config["bot"]["history_messages"]))
+                current_config = load_config()
+                generation = dict(current_config["llm"])
+                revision = persona_key(generation["system_prompt"])
+                history = store.history(session_id, int(current_config["bot"]["history_messages"]), persona=revision)
                 history.append({"role": "user", "content": text})
                 try:
                     _, current_provider = get_profile(load_provider_store())
                     client.profile = current_provider
-                    reply = await client.complete(history)
+                    with client.using_generation(generation):
+                        reply = await client.complete(history)
                 except LLMError as exc:
                     print(f"错误：{exc}")
                     continue
                 keep = int(config["bot"]["history_messages"])
-                store.add(session_id, "user", text, keep)
-                store.add(session_id, "assistant", reply, keep)
+                store.add(session_id, "user", text, keep, persona=revision)
+                store.add(session_id, "assistant", reply, keep, persona=revision)
                 print(f"AI> {reply}")
     finally:
         store.close()

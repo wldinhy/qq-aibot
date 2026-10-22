@@ -2,6 +2,7 @@
 config.json
 providers.json
 .venv/
+.venv-ubuntu/
 .local/
 __pycache__/
 *.py[cod]
@@ -11,3 +12,4 @@ data/
 dist/
 build/
 *.egg-info/
+*.lnk

@@ -16,16 +16,21 @@ QQ 号在 OneBot 接入端登录。控制台的“QQ / OneBot 连接”可填写
 - 不带参数运行 `qq-aibot`，进入完整交互式控制台
 - 所有常用设置都有编号菜单，不需要记命令
 - Windows 上 `start.cmd` 或 `qq-aibot start` 一条命令启动机器人和 NapCat
+- Ubuntu/WSL 支持：独立 `.venv-ubuntu` 环境，Windows 启动脚本一键打开 WSL 终端
 - DeepSeek、OpenAI 及其他 OpenAI 兼容服务
 - 支持自建服务，例如提供 OpenAI 兼容接口的 Ollama、LM Studio 或 vLLM
 - 保存多个服务商配置档，每个配置档拥有独立 URL、Key 和模型
 - 通过 `GET /models` 检索模型并在终端选择
 - 不支持模型检索的服务可以手工填写模型名
 - 私聊默认向所有人开放；群聊默认被 `@` 时回复
+- **结构化回复**：AI 自主决定发送 0-3 条文本和 0-1 个表情包，不再一问一答
+- **内置表情包库**：8 个情绪表情，支持本地自定义扩展
+- **身份保护**：拒绝用户通过对话修改 AI 名字、身份和人设，只能本地配置文件设定
 - 每个私聊独立记忆，每个群共享群聊上下文
 - 用户和群白名单、黑名单
 - SQLite 本地记忆，无需额外数据库
 - OneBot Token 鉴权、并发和长度限制
+- 改进的终端界面：分组显示功能开关、回复限制和安全状态
 
 ## Windows 一站式下载与安装
 
@@ -38,22 +43,41 @@ QQ 号在 OneBot 接入端登录。控制台的“QQ / OneBot 连接”可填写
    `NapCat.Shell.zip`；重复运行会保留现有配置。
 3. 运行 `.\.venv\Scripts\qq-aibot.exe`，在菜单 `2. 服务商 / API / 模型` 中填写自己的
    API 地址和 Key，并选模型。
-4. 运行 `.\start.cmd`。这**一条命令**会打开 NapCat 和机器人两个可见窗口；首次启动按
+4. 双击 `start.cmd` 或运行 `.\start.cmd`。启用生图后，这**一条命令**会打开 ComfyUI、NapCat 和机器人三个可见窗口；首次启动按
    NapCat 窗口的二维码用手机 QQ 扫码确认。启动脚本会自动把 NapCat 的反向 WebSocket
    接到机器人，不需要手工复制 Token。
 
-从已安装的项目目录运行 `.\.venv\Scripts\qq-aibot.exe start` 也会同时启动两者。机器人的
-运行日志显示在新打开的 PowerShell 窗口。保持两个窗口打开即可持续回复；关闭机器人窗口
+从已安装的项目目录运行 `.\.venv\Scripts\qq-aibot.exe start` 也会启动上述服务。机器人的
+运行日志显示在新打开的 PowerShell 窗口。保持三个服务窗口打开即可聊天和生图；关闭 ComfyUI 或机器人窗口
 按 `Ctrl+C`，关闭 NapCat 窗口按 `Ctrl+C`，若提示 `Terminate batch job (Y/N)?`，输入 `Y`。
 如果同一个 QQ 已在普通电脑版 QQ 登录，先退出普通 QQ 再让 NapCat 登录。
 
 开发者也可以 `git clone https://github.com/wldinhy/qq-aibot.git`，然后运行
-`.\install.cmd`。Linux 用户可用 `python -m venv .venv`、`pip install -e .` 安装机器人，
-并自行配置 OneBot 11 接入端；Windows 一键脚本不适用于 Linux。
+`.\install.cmd`（Windows）或 `./install.sh`（Ubuntu/WSL）。
 
-本地会生成三个不会上传 GitHub 的文件或目录：
+### Ubuntu / WSL 用户
+
+在 Ubuntu 或 Windows WSL 环境运行机器人：
+
+```bash
+./install.sh
+.venv-ubuntu/bin/qq-aibot provider add deepseek --base-url https://api.deepseek.com
+.venv-ubuntu/bin/qq-aibot serve
+```
+
+Windows 用户安装 WSL Ubuntu 后，双击 `start-ubuntu.cmd` 可同时启动三个服务，机器人的日志显示在 Ubuntu 终端。NapCat 和 ComfyUI 仍在 Windows 运行。`start.sh` 在 WSL 中默认调用项目已有的 Windows Python 运行时，以便连接 Windows 本机服务，包括 WSL NAT 模式。本机已有的 `QQ AI Bot.lnk` 可以继续使用；快捷方式包含本机绝对路径，因此不随源码发布。
+
+原生 Linux 环境单独安装在 `.venv-ubuntu`。需要原生 Ubuntu 运行时，可运行 `bash start.sh --native`；打开交互式控制面板可运行 `bash start.sh --console`（原生模式为 `bash start.sh --native --console`）。Linux 原生模式需要按下面的说明配置跨系统网络；默认的 Ubuntu 终端兼容模式不需要改网络。
+
+**WSL 网络配置**：
+- WSL2 镜像模式（Windows 11 22H2+）：`localhost` 可直接访问 Windows 服务
+- WSL2 NAT 模式：需要配置 Windows 主机 IP（如 `172.x.x.x`）连接 ComfyUI 和 NapCat
+- 机器人监听 `0.0.0.0` 以便 Windows NapCat 连接
+
+本地会生成以下不会上传 GitHub 的文件或目录：
 
 - `providers.json`：服务商、模型和 API Key
+- `config.json`：机器人性格、QQ 号和本机功能配置
 - `.env`：OneBot Token
 - `data/`：聊天记忆
 - `.local/`：NapCat 程序、QQ 登录态及本机设置
@@ -211,12 +235,141 @@ qq-aibot config set bot.allowed_users "[12345678, 87654321]"
 # 群白名单
 qq-aibot config set bot.allowed_groups "[123456789]"
 
-# 修改人格
+# 修改人格（只能本地配置，用户无法通过对话修改）
 qq-aibot config set llm.system_prompt "你是一个耐心、简洁的编程学习助手。"
+
+# 回复限制
+qq-aibot config set llm.max_tokens 700
+qq-aibot config set bot.max_reply_messages 3
+qq-aibot config set bot.max_reply_chars_per_message 280
+qq-aibot config set bot.max_reply_stickers 1
+
+# 表情包功能；空路径使用随程序附带的表情库
+qq-aibot config set stickers.enabled true
+qq-aibot config set stickers.manifest '""'
 ```
 
 修改普通机器人设置后重启生效。聊天用户可以发送 `/reset` 清空当前会话记忆，发送
 `/help` 查看帮助。
+
+## 结构化回复和表情包
+
+机器人使用结构化回复计划，AI 自主决定：
+- 发送 0-3 条文本消息（默认最多 3 条）
+- 可选发送 0-1 个表情包
+- 每条消息最多 280 字符（可配置）
+- 总字符数不超过 1800
+
+内置 8 个基础情绪表情：happy、laugh、think、confused、cry、angry、cool、surprised。
+可通过 `stickers.manifest` 配置本地表情包库，支持 PNG、JPG、GIF、WebP 格式。
+
+表情包清单格式：
+```json
+{
+  "stickers": [
+    {
+      "id": "happy",
+      "file": "happy.png",
+      "tags": ["开心", "高兴"],
+      "caption": "开心"
+    }
+  ]
+}
+```
+
+## 身份保护
+
+机器人拒绝通过 QQ 对话修改名字、身份、角色和人设。以下请求会被礼貌拒绝：
+- "你叫小明"
+- "你现在是医生"
+- "扮演一个老师"
+- "改变你的身份"
+- "增加设定"
+
+正常的命名请求（给宠物起名、故事角色等）和创作请求不受影响。身份只能通过本地 `llm.system_prompt` 设定。
+本地性格设置在每条新消息开始处理时重新读取，不需要为性格修改重启机器人或手动 `/reset`。同一条请求的性格和 token 参数使用独立快照，避免并发时互相覆盖。聊天上下文按性格提示词分开保存，旧设定的回复不会混入新设定；升级时会先用 SQLite 备份接口备份旧数据库，原记录保留。首次加载新性格会从独立上下文开始；将性格改回原来的完整提示词，可继续该设定下的新版本上下文。其他运行参数和程序代码更新仍需重新加载进程。
+所有会话请求都会附加系统保护规则，显式改名和改人设命令还会经过程序规则检查。对话内容没有修改配置文件的入口；这些保护降低模型被诱导改口的概率，但不声称提示词能绝对阻止所有提示注入。
+
+## 本地图片生成（ComfyUI）
+
+在原有聊天功能上增加一个可选工具，由当前 DeepSeek 根据消息和对话上下文决定是否生成图片、选择文生图或图生图，并编写英文提示词。普通聊天仍在同一次模型请求中返回文字。启用时服务商必须支持 Chat Completions 的 `tools` / `tool_calls`，推荐使用现有 DeepSeek 配置。
+
+内置两套 API 工作流来自 `D:\Comfy-Desktop` 中已执行图片的工作流元数据，只保留模型、节点连接、负面提示词和采样参数。原来的正面提示词和私人图片路径没有保留：
+
+- 文生图：`animagine-xl-4.0 .safetensors`，768×1024，28 步，CFG 7，DPM++ 2M / Karras，denoise 1。
+- 图生图：同一模型，30 步，CFG 7，DPM++ 2M / Karras，默认 denoise 0.45；原图按比例缩放到约 0.75 兆像素、尺寸对齐 64 像素后进行 VAE 编码，避免大图占用过多显存。
+
+使用方式：
+
+1. 双击 `start.cmd`（Ubuntu 终端用 `start-ubuntu.cmd`）；启用生图时会自动启动 ComfyUI 本地服务、NapCat 和机器人。ComfyUI 默认使用 `D:\Comfy-Desktop\ComfyUI-Installs\ComfyUI` 的现有 Python 和模型，服务地址为 `http://127.0.0.1:8188`。已运行的服务会直接复用。自动启动的 ComfyUI 输入、输出和数据库放在机器人目录的 `data/comfyui` 中，控制台显示启动日志；无需另开 ComfyUI Desktop。其他安装位置可通过环境变量 `COMFYUI_HOME` 指定安装目录。
+2. 首次安装默认关闭生图；运行下面的命令启用，然后重启机器人。本次开发使用的本地 `config.json` 已启用。
+3. 在 QQ 私聊中发送“画一只坐在花园里的小猫”；修改图片时，把图片附件和“把这张图改成水彩风格”的文字放在**同一条消息**中。
+
+```powershell
+qq-aibot config set image_generation.enabled true
+qq-aibot config set image_generation.api_base "http://127.0.0.1:8188"
+qq-aibot config set image_generation.timeout_seconds 300
+
+# 关闭功能后重启，即恢复原有纯文字聊天
+qq-aibot config set image_generation.enabled false
+```
+
+图生图只使用当前消息的第一张附件，不自动读取引用消息或历史图片。启用看图后，图片会发送给当前支持视觉的模型 API 理解内容；图片生成仍在本机 ComfyUI 执行。机器人先回复生成提示，再通过 OneBot 图片消息段发送结果；模型错误、未启动或超时会明确回复失败。GPU 任务在机器人内串行执行，避免同时加载多个生成任务。超时结束机器人等待，ComfyUI 已入队任务可能继续执行，可在 ComfyUI 队列中取消。
+
+聊天权限和群聊开关继续生效；群聊仍需按原有设置开启。原图上传到 ComfyUI 的 `input/qq_aibot`，生成结果保存在其输出目录。机器人使用 base64 回传，NapCat 无需共享输出目录。输入和输出文件保留在 ComfyUI 中，可按需清理；`/reset` 只清空聊天记忆。
+
+工作流文件位于 `src/qq_aibot/workflows/`，会随安装包一起发布。可通过 `image_generation.text_workflow` / `image_generation.image_workflow` 指定 API 格式 JSON 路径（相对路径基于机器人目录）。自定义工作流需保留当前绑定：正面文本节点 `2`、采样种子节点 `4`、输出节点 `7`，图生图加载原图节点 `9`。前端画布 JSON 需要先导出为 API 格式。
+
+## 图片、表情包识别与旧消息过滤
+
+默认启用 `vision.enabled`，当前 `deepseek-flash` 支持真实图片输入。发送图片或表情包即可让机器人根据图片内容、图中文字和对话上下文回复，单独发图不会自动触发生图。QQ 自带表情会保留名称或 ID；自定义图片表情包会作为图片发送给模型。默认每条消息最多识别 3 张图片，每张最多 10 MB，支持 PNG、JPEG、GIF 和 WebP。
+
+机器人先下载 QQ 提供的图片链接；链接因 Rkey 失效或网络问题无法下载时，改用 OneBot `get_image` 请求 NapCat 下载原图，读取其返回的 base64 或本地文件。若两种方式均失败，会明确告诉模型图片未读取，避免猜测内容。这个回退不修复第三方 Rkey 服务本身，NapCat 的 Rkey 错误日志仍可能出现。
+
+默认 `bot.ignore_before_start=true`，按 QQ 消息的 `time` 时间戳忽略机器人启动前的消息，也忽略没有有效时间戳的消息；同一次运行内对已收到的消息 ID 去重，防止连接恢复后重复回复。已有聊天记忆继续作为新消息的上下文，不会主动补发历史回复。图片二进制不会写入聊天数据库。
+
+```powershell
+qq-aibot config set vision.enabled true
+qq-aibot config set bot.ignore_before_start true
+```
+
+代码更新后，停止机器人窗口中的旧实例，再用 `start.cmd` 或 `start-ubuntu.cmd` 启动即可。性格和聊天参数等支持热加载的设置无需重启，保存提示会说明生效时间。NapCat 和 ComfyUI 已运行时会复用。
+
+## 请求排队和生图提示词优化
+
+默认 `bot.processing_mode=parallel`：同一私聊或同一群的消息按到达顺序逐条处理，前一条的回复写入记忆后才处理后一条；不同对话最多 `bot.max_concurrency` 路并行，默认 4 路。同一个人连续发送多条消息只占一个处理名额，其他人的对话仍能被调度。需要等待时发送排队提示；单条失败会回复失败原因，后续请求继续执行。ComfyUI 的 GPU 生成任务按提交顺序串行执行。
+
+如果需要所有人的请求都严格按全局到达顺序处理，设置 `serial`：
+
+```powershell
+qq-aibot config set bot.processing_mode serial
+
+# 多路模式：每段对话保持顺序，不同对话并行
+qq-aibot config set bot.processing_mode parallel
+qq-aibot config set bot.max_concurrency 4
+```
+
+队列保存在当前进程内，不会因为忙碌丢弃已接收请求；停止进程会结束当前任务和等待队列。建议等待排队任务完成后再重启。启动前的 QQ 消息继续被过滤，不会重新补回。
+
+默认 `image_generation.optimize_prompt=true`。DeepSeek 判断需要生图后，会再用一轮请求整理适合 Animagine XL 的英文标签和负面提示词：主体和修改目标优先、去掉重复或矛盾描述、忠实保留用户要求。图生图结合第一张真实原图识别特征，写清最终画面的主体、构图和修改内容，并选择重绘强度：小幅细节修改通常 0.25–0.35，背景或服装改动 0.4–0.5，风格重绘 0.55–0.65。优化失败会回退到第一轮提示词继续生成。这个步骤增加一轮模型调用和少量等待时间。
+
+这是普通图生图流程，会重绘整张图；低重绘强度有助于保留特征，但不能保证人物身份和未修改区域完全一致，也不是按遮罩局部编辑。可调整默认值，或关闭额外提示词整理：
+
+```powershell
+qq-aibot config set image_generation.img2img_denoise 0.45
+qq-aibot config set image_generation.img2img_megapixels 0.75
+qq-aibot config set image_generation.optimize_prompt false
+```
+
+## 终端设置与聊天上下文
+
+Ubuntu 中在项目目录运行 `bash start.sh --console` 打开配置界面。交互终端会在原位置刷新页面，保存提示留在页面顶部；输出重定向到文件时使用普通文本。主菜单选择 **3 → 10** 设置自然聊天、回复风格、Token、消息条数、字符上限、表情包数量和群聊上下文；**3 → 11** 设置识图、生图和提示词优化；**3 → 12** 设置排队与旧消息过滤。每次保存都会提示生效时间。
+
+默认启用 `llm.natural_style=true` 和 `llm.reply_style=brief`：日常聊天简短接话，减少客服套话、复述、说教和机械追问；需要解释的问题可以展开。`llm.reply_style=adaptive` 可改为按问题决定详细程度。本地性格提示词仍由管理员配置。性格、聊天风格、回复上限和上下文设置从下一条请求读取；并发数、排队模式及生图服务参数在下次启动生效。
+
+默认 `bot.group_context=true`。群聊回复开启后，机器人将同一群中启动后实际收到的近期消息作为背景，包括未 @ 机器人的发言，保留昵称、QQ 号和当前运行期间收到过的引用内容；是否触发回复仍由群聊模式决定。黑名单、白名单和旧消息过滤继续生效。群聊关闭时不收集群聊上下文，不同群和私聊互相隔离。群聊现场上下文保存在有大小上限的内存中，重启后从新收到的消息重新积累；原有聊天数据库记录保留。私聊继续使用双方实际对话记录。模型被要求优先依据用户发言，被纠正时更新理解，不能把自己的旧猜测当成事实。
+
+当前消息的图片仍可实际识别；背景里的历史图片只有文本摘要，不会猜测未看到的图片。尚未收到过的引用内容会标为未知。`/reset` 同时清空当前会话的数据库记忆和群聊现场上下文。
 
 ## 清除记忆
 

@@ -8,9 +8,34 @@ from typing import Any
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "vision": {
+        "enabled": True,
+        "max_images": 3,
+        "max_image_bytes": 10485760,
+        "timeout_seconds": 30,
+    },
+    "image_generation": {
+        "enabled": False,
+        "api_base": "http://127.0.0.1:8188",
+        "timeout_seconds": 300,
+        "max_image_bytes": 20971520,
+        "text_workflow": "",
+        "image_workflow": "",
+        "optimize_prompt": True,
+        "img2img_denoise": 0.45,
+        "img2img_megapixels": 0.75,
+        "optimizer_max_tokens": 1000,
+    },
+    "stickers": {
+        "enabled": True,
+        "manifest": "",
+        "max_file_bytes": 2097152,
+    },
     "llm": {
         "temperature": 0.8,
-        "max_tokens": 800,
+        "natural_style": True,
+        "reply_style": "brief",
+        "max_tokens": 700,
         "timeout_seconds": 90,
         "system_prompt": (
             "你是一个在 QQ 中交流的 AI 助手。回复自然、简洁、友善，使用与对方相同的语言。"
@@ -24,11 +49,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "path": "/onebot/v11/ws",
     },
     "bot": {
+        "processing_mode": "parallel",
+        "queue_notice": True,
+        "ignore_before_start": True,
         "private_reply": True,
         "group_mode": "mention",
         "history_messages": 20,
+        "group_context": True,
         "max_input_chars": 4000,
-        "max_reply_chars": 1800,
+        "max_reply_chars": 840,
+        "max_reply_messages": 3,
+        "max_reply_chars_per_message": 280,
+        "max_reply_stickers": 1,
         "max_concurrency": 4,
         "allowed_users": [],
         "blocked_users": [],

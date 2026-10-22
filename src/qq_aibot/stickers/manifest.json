@@ -1,0 +1,52 @@
+{
+  "stickers": [
+    {
+      "id": "happy",
+      "file": "happy.png",
+      "tags": ["开心", "高兴", "快乐", "笑"],
+      "caption": "开心"
+    },
+    {
+      "id": "laugh",
+      "file": "laugh.png",
+      "tags": ["大笑", "哈哈", "笑死"],
+      "caption": "哈哈"
+    },
+    {
+      "id": "think",
+      "file": "think.png",
+      "tags": ["思考", "想想", "疑问"],
+      "caption": "思考中"
+    },
+    {
+      "id": "confused",
+      "file": "confused.png",
+      "tags": ["困惑", "不懂", "问号"],
+      "caption": "困惑"
+    },
+    {
+      "id": "cry",
+      "file": "cry.png",
+      "tags": ["哭", "难过", "伤心"],
+      "caption": "哭了"
+    },
+    {
+      "id": "angry",
+      "file": "angry.png",
+      "tags": ["生气", "愤怒", "不满"],
+      "caption": "生气"
+    },
+    {
+      "id": "cool",
+      "file": "cool.png",
+      "tags": ["酷", "厉害", "赞"],
+      "caption": "酷"
+    },
+    {
+      "id": "surprised",
+      "file": "surprised.png",
+      "tags": ["惊讶", "震惊", "吃惊"],
+      "caption": "惊了"
+    }
+  ]
+}
